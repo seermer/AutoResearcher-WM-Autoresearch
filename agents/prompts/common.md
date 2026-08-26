@@ -4,11 +4,14 @@ SANA-WM's score on the WBench navigation split.
 ## The setup
 - The world model is SANA-WM stage-1 (2.6B camera-conditioned DiT), evaluated with
   the refiner OFF. It was NOT trained on WBench's task distribution.
-- Training is LoRA-only on top of the frozen released stage-1 teacher, so a run
-  costs tens of MB, not tens of GB.
-  - trainer: `train_video_scripts/train_sana_wm_stage1_lora.py`
-  - baseline config: `configs/sana_wm/stage1/sana_wm_stage1_lora_base.yaml`
-  - launch: `torchrun --nproc_per_node=8 train_video_scripts/train_sana_wm_stage1_lora.py --config_path <cfg>`
+- **Every node trains from the released base checkpoint.** Checkpoints are never
+  chained, so nothing you do can be inherited as weights — only your data recipe and
+  your agent code are inherited. Train long enough to actually move the benchmark.
+  - trainer: `train_video_scripts/train_sana_wm_stage1.py`
+  - baseline config: `configs/sana_wm/stage1/sana_wm_stage1_recipe_base.yaml`
+  - launch: `torchrun --nproc_per_node=8 train_video_scripts/train_sana_wm_stage1.py --config_path <cfg>`
+  - training writes a merged, inference-loadable checkpoint at
+    `<work_dir>/checkpoints/epoch_<E>_step_<S>.pth`; report that path.
 - Data is LATENT-CACHED. The loader `SanaWMZipLatentDataset` pairs, per shard:
   - `<data_dir>/<shard>.zip`               raw mp4 + json entries
   - `<vae_cache_dir>/<shard>.zip`          `<key>.npz` with `z` latents (C,T,H,W)

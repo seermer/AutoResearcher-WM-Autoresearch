@@ -53,17 +53,44 @@ def _env_for(conda_python: str, gpus: str) -> dict:
             "TOKENIZERS_PARALLELISM": "false"}
 
 
-def score_from_report(report: dict, split: str = "navi") -> tuple[float | None, dict, dict]:
-    """Leaderboard-style scalar: mean over the dimensions that have any metric present."""
+def metric_set_path() -> Path:
+    return PATHS.archive / "metric_set.json"
+
+
+def pinned_metrics() -> list[str] | None:
+    """The metric set the archive scores on, fixed by the root node.
+
+    A metric can fail on one node and succeed on another (a missing package, a
+    flaky model load). Averaging over whatever happened to run would let a node
+    score higher just because a metric that would have dragged it down crashed,
+    so the set is pinned and a node missing any of it is failed instead.
+    """
+    p = metric_set_path()
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+def pin_metrics(metrics: dict) -> list[str]:
+    names = sorted(metrics)
+    metric_set_path().parent.mkdir(parents=True, exist_ok=True)
+    metric_set_path().write_text(json.dumps(names, indent=1))
+    return names
+
+
+def score_from_report(report: dict, split: str = "navi",
+                      pinned: list[str] | None = None) -> tuple[float | None, dict, dict, list[str]]:
+    """Leaderboard-style scalar: mean over dimensions, restricted to the pinned set."""
     table = report.get(split) or {}
-    metrics = {k: round(v["mean"] * 100, 3) for k, v in table.items() if isinstance(v, dict) and "mean" in v}
+    metrics = {k: round(v["mean"] * 100, 3) for k, v in table.items()
+               if isinstance(v, dict) and "mean" in v and v.get("n")}
+    missing = sorted(set(pinned) - set(metrics)) if pinned else []
+    scored = {k: v for k, v in metrics.items() if pinned is None or k in pinned}
     dims = {}
     for dim, names in DIMENSIONS.items():
-        vals = [metrics[n] for n in names if n in metrics]
+        vals = [scored[n] for n in names if n in scored]
         if vals:
             dims[dim] = round(sum(vals) / len(vals), 3)
     score = round(sum(dims.values()) / len(dims), 3) if dims else None
-    return score, dims, metrics
+    return score, dims, metrics, missing
 
 
 class Evaluator:
@@ -74,7 +101,7 @@ class Evaluator:
 
     # ---- generation ----
     def generate(self, node_id: str, sana_root: Path, work_dir: Path, cases,
-                 lora: Path | None, gpus: list[str], timeout: int,
+                 ckpt: Path | None, gpus: list[str], timeout: int,
                  base_ckpt: str | None = None, config: str | None = None,
                  step: int = 60, duration: float = 4.0, resume: bool = True) -> dict:
         videos = work_dir / node_id / "videos"
@@ -90,9 +117,9 @@ class Evaluator:
                    "--out_dir", str(videos), "--cases", str(ids_path),
                    "--shard", str(shard), "--num_shards", str(len(gpus)),
                    "--duration", str(duration), "--step", str(step)]
-            if lora:
-                cmd += ["--lora", str(lora)]
-            if base_ckpt:
+            if ckpt:
+                cmd += ["--model_path", str(ckpt)]
+            elif base_ckpt:
                 cmd += ["--model_path", base_ckpt]
             if config:
                 cmd += ["--config", config]
@@ -140,7 +167,7 @@ class Evaluator:
         return {"report": json.loads(report_path.read_text()), "report_path": str(report_path)}
 
     # ---- public ----
-    def run(self, node_id: str, sana_root: Path, out_dir: Path, lora: Path | None,
+    def run(self, node_id: str, sana_root: Path, out_dir: Path, ckpt: Path | None,
             full: bool = False, base_ckpt: str | None = None, config: str | None = None) -> EvalResult:
         t0 = time.time()
         cases = navi_cases() if full else proxy_cases()
@@ -151,7 +178,7 @@ class Evaluator:
 
         with self.tracer.span("eval.generate", node=node_id, n_cases=len(cases), full=full):
             gen = self.generate(
-                node_id, sana_root, work_dir, cases, lora, gpus,
+                node_id, sana_root, work_dir, cases, ckpt, gpus,
                 timeout=BUDGET.eval_seconds, base_ckpt=base_ckpt, config=config,
                 step=EVAL.full_step if full else EVAL.proxy_step,
                 duration=EVAL.turn_duration_s if full else EVAL.proxy_turn_duration_s)
@@ -165,10 +192,17 @@ class Evaluator:
         if "error" in res:
             return EvalResult(ok=False, seconds=time.time() - t0, failure=res["error"])
 
-        score, dims, metrics = score_from_report(res["report"], EVAL.split)
+        pinned = pinned_metrics()
+        score, dims, metrics, missing = score_from_report(res["report"], EVAL.split, pinned)
         if score is None:
             return EvalResult(ok=False, seconds=time.time() - t0,
                               failure="report contained no usable metrics")
+        if pinned is None:
+            pinned = pin_metrics(metrics)
+            self.tracer.emit("eval.metrics_pinned", metrics=pinned)
+        elif missing:
+            return EvalResult(ok=False, seconds=time.time() - t0,
+                              failure=f"metrics missing vs the pinned set: {missing}")
         return EvalResult(ok=True, score=score, dimensions=dims, metrics=metrics,
                           n_cases=gen["produced"], report_path=res["report_path"],
                           seconds=time.time() - t0)

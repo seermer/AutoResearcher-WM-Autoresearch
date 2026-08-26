@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Same filesystem as the real archive, so the disk-headroom check sees real numbers.
 ARCHIVE = Path(tempfile.mkdtemp(prefix="ar-selftest-", dir=str(ROOT.parent)))
 os.environ["AR_ARCHIVE_DIR"] = str(ARCHIVE)
+os.environ["AR_ARCHIVE_DIR"] = str(ARCHIVE)
 sys.path.insert(0, str(ROOT))
 
 from kernel import selection, vcs  # noqa: E402
@@ -27,7 +28,7 @@ from kernel.loop import Loop  # noqa: E402
 SCRIPT = {}   # node_id -> behaviour for this fake node
 
 
-def fake_eval(self, node_id, sana_root, out_dir, lora=None, full=False, **kw):
+def fake_eval(self, node_id, sana_root, out_dir, ckpt=None, full=False, **kw):
     beh = SCRIPT.get(node_id, {})
     if beh.get("eval_fail"):
         return EvalResult(ok=False, failure="stub: generation crashed")
@@ -52,12 +53,12 @@ def fake_agent(self, phase, worktree, ctx, writable, readable, log_dir, timeout)
         else:
             target.write_text(target.read_text() + f"\n<!-- edit by {ctx.node_id} -->\n")
         return {"ok": True, "summary": f"edit by {ctx.node_id}", "hypothesis": "h", "files": []}
-    adapter = Path(ctx.out_dir) / "lora" / "latest"
-    adapter.mkdir(parents=True, exist_ok=True)
-    (adapter / "adapter_model.safetensors").write_bytes(b"stub")
-    (adapter / "adapter_config.json").write_text(json.dumps({"r": 32, "lora_alpha": 64}))
+    ckpt_dir = Path(ctx.out_dir) / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt = ckpt_dir / "epoch_1_step_400.pth"
+    ckpt.write_bytes(b"stub-checkpoint")
     (Path(ctx.sana_dir) / "configs" / f"{ctx.node_id}.yaml").write_text("stub: 1\n")
-    return {"ok": True, "lora_path": str(adapter),
+    return {"ok": True, "checkpoint_path": str(ckpt),
             "recipe": {"plan": beh.get("plan", f"plan for {ctx.node_id}")},
             "train": {"steps": "300"}}
 
@@ -105,8 +106,14 @@ def main() -> None:
               vcs.branch_exists(ROOT, f"trash/{nid}") and not vcs.branch_exists(ROOT, f"node/{nid}"))
         check(f"{nid} worktree removed", not (ARCHIVE / "worktrees" / nid).exists())
 
-    check("lora kept per node", (by["n0001"].dir / "lora" / "adapter_model.safetensors").exists())
-    check("adapter is small", by["n0001"].dir.stat().st_size < 10 * 2**20)
+    from kernel.config import PATHS
+    kept = sorted(PATHS.current.glob("*.pth")) if PATHS.current.exists() else []
+    check(f"exactly one checkpoint retained (found {len(kept)})", len(kept) == 1)
+    newest = max((n for n in a.alive() if n.evaluated_at), key=lambda n: n.evaluated_at)
+    check("retained checkpoint belongs to the newest node", kept[0].stem == newest.id)
+    check("older nodes marked evicted",
+          all(n.checkpoint_path is None and n.checkpoint_evicted
+              for n in a.alive() if n.id != newest.id and n.evaluated_at and n.id != "n0000"))
 
     # CMP was backed up through every ancestor
     root = by["n0000"]

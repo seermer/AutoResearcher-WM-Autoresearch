@@ -51,8 +51,8 @@ def cmd_doctor(args) -> None:
         ("WBench cases", len(navi_cases()) == 158),
         ("base corpus", (PATHS.sana / "data" / "sekai_game_train_961frames_16fps_ovl640").exists()),
         ("vae cache", (PATHS.sana / "data" / "vae_cache").exists()),
-        ("LoRA trainer", (PATHS.sana / "train_video_scripts" / "train_sana_wm_stage1_lora.py").exists()),
-        ("LoRA config", (PATHS.sana / "configs" / "sana_wm" / "stage1" / "sana_wm_stage1_lora_base.yaml").exists()),
+        ("stage-1 trainer", (PATHS.sana / "train_video_scripts" / "train_sana_wm_stage1.py").exists()),
+        ("recipe config", (PATHS.sana / "configs" / "sana_wm" / "stage1" / "sana_wm_stage1_recipe_base.yaml").exists()),
         ("LLM endpoint set", bool(__import__("os").environ.get("OPENAI_BASE_URL"))),
         ("stage-1 weights bundle", (weights.bundle_dir() / weights.DIT_FILE).exists()),
         ("caches off $HOME", not str(__import__("os").environ.get("HF_HOME", "")).startswith(str(Path.home()))),
@@ -88,7 +88,8 @@ def cmd_eval(args) -> None:
     ws = NodeWorkspace(node.id, node.parent)
     sana = ws.sana if ws.sana.exists() else PATHS.sana
     res = Evaluator().run(node.id, sana, node.dir,
-                          lora=Path(node.lora_path) if node.lora_path else None, full=args.full)
+                          ckpt=Path(node.checkpoint_path) if node.checkpoint_path else None,
+                          full=args.full)
     print(json.dumps(res.summary(), indent=2))
     if res.ok and args.full:
         node.full_score = res.score

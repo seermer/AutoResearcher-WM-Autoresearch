@@ -24,7 +24,8 @@ class Node:
     self_edit: dict = field(default_factory=dict)     # summary + diffstat of edit_self
     recipe: dict = field(default_factory=dict)        # data recipe manifest
     train: dict = field(default_factory=dict)         # steps, lora config, wall-clock
-    lora_path: str | None = None
+    checkpoint_path: str | None = None    # only the newest node keeps one
+    checkpoint_evicted: bool = False
     # Evaluation
     score: float | None = None                        # scalar objective (proxy average)
     metrics: dict = field(default_factory=dict)       # per-metric breakdown

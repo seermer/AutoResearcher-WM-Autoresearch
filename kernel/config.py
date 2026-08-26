@@ -42,6 +42,12 @@ class Paths:
         return self.archive / "traces"
 
     @property
+    def current(self) -> Path:
+        """Holds exactly one checkpoint: the newest node's. Nodes train from base,
+        never from each other, so nothing older is ever needed again."""
+        return self.archive / "current"
+
+    @property
     def cache(self) -> Path:
         """All model/dataset caches live on the workspace disk, never in $HOME."""
         return _env_path("AR_CACHE_DIR", WORKSPACE / "cache")

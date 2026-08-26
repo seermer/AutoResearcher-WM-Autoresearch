@@ -26,22 +26,22 @@ def edit_self(ctx: EditSelfContext) -> EditSelfResult:
 
 
 def improve_recipe(ctx: ImproveRecipeContext) -> ImproveRecipeResult:
-    """Improve the WM data recipe, train, and return the LoRA adapter path."""
+    """Improve the WM data recipe, train from base, and return the checkpoint path."""
     from . import memory
     from .graph import recipe_graph
     try:
         out = recipe_graph().invoke({"ctx": ctx, "attempts": 0}, {"recursion_limit": 80})
     except Exception as e:  # noqa: BLE001
         return ImproveRecipeResult(ok=False, error=f"{type(e).__name__}: {e}")
-    if out.get("error") or not out.get("adapter"):
-        return ImproveRecipeResult(ok=False, error=out.get("error") or "no adapter produced",
+    if out.get("error") or not out.get("checkpoint"):
+        return ImproveRecipeResult(ok=False, error=out.get("error") or "no checkpoint produced",
                                    summary=out.get("plan", ""))
     recipe = {"plan": out.get("plan", ""), "mechanism": out.get("mechanism", ""),
               "weaknesses": out.get("weaknesses", ""), "sources": (out.get("sources") or "")[:1500],
               "actions": out.get("actions", "")}
     memory.append(ctx.memory_dir, "recipes", f"{ctx.node_id}: {out.get('plan','')[:220]}")
     return ImproveRecipeResult(
-        lora_path=out["adapter"], recipe=recipe,
+        checkpoint_path=out["checkpoint"], recipe=recipe,
         train={"config": out.get("config", ""), "steps": out.get("steps", "")},
         summary=out.get("plan", ""),
     )

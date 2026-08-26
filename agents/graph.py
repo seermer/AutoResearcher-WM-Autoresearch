@@ -33,7 +33,7 @@ class RecipeState(TypedDict, total=False):
     actions: Annotated[str, _last]
     config: Annotated[str, _last]
     steps: Annotated[str, _last]
-    adapter: Annotated[str, _last]
+    checkpoint: Annotated[str, _last]
     attempts: Annotated[int, _last]
     error: Annotated[str, _last]
 
@@ -85,28 +85,30 @@ def n_engineer(state: RecipeState) -> dict:
         f"PLAN:\n{state.get('plan','')}\n\n"
         f"SOURCES:\n{state.get('sources','(none needed)')}\n\n"
         f"Paths: sana={c.sana_dir}  datastore={c.datastore_dir}  out={c.out_dir}  "
-        f"logs={c.logs_dir}  baseline_lora={c.baseline_lora}\n"
+        f"logs={c.logs_dir}  base_checkpoint={c.base_checkpoint}\n"
         f"GPUs={c.gpus}. Wall-clock budget {c.budget_seconds//3600}h, disk {c.disk_gb:.0f} GB.\n"
         f"Implement the plan, train, and report the adapter path.{retry}"),
         memory_dir=c.memory_dir, steps=roles.STEP_LIMIT + 20)
     return {"actions": roles.field(out, "ACTIONS", out),
             "config": roles.field(out, "CONFIG"),
             "steps": roles.field(out, "STEPS"),
-            "adapter": roles.field(out, "ADAPTER"),
+            "checkpoint": roles.field(out, "CHECKPOINT"),
             "attempts": attempt}
 
 
 def n_verify(state: RecipeState) -> dict:
-    """Pure check, no LLM: did training actually produce a loadable adapter?"""
-    raw = (state.get("adapter") or "").strip().split()
+    """Pure check, no LLM: did training actually produce a loadable checkpoint?"""
+    raw = (state.get("checkpoint") or "").strip().split()
     path = Path(raw[0]) if raw and raw[0].upper() != "NONE" else None
     if path is None:
-        return {"error": "engineer reported no adapter"}
-    if not path.exists():
-        return {"error": f"adapter path does not exist: {path}"}
-    if not (path / "adapter_model.safetensors").exists():
-        return {"error": f"no adapter_model.safetensors in {path}"}
-    return {"error": "", "adapter": str(path.resolve())}
+        return {"error": "engineer reported no checkpoint"}
+    if not path.is_file():
+        return {"error": f"checkpoint is not a file: {path}"}
+    if path.suffix != ".pth":
+        return {"error": f"expected the merged .pth, got {path}"}
+    if path.stat().st_size < 2 * 2**30:
+        return {"error": f"checkpoint suspiciously small ({path.stat().st_size/2**30:.2f} GB)"}
+    return {"error": "", "checkpoint": str(path.resolve())}
 
 
 def _after_plan(state: RecipeState) -> str:

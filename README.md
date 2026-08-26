@@ -88,13 +88,19 @@ on top of that.
 
 ## Checkpoints
 
-LoRA only. The base DiT stays frozen; adapters on `q_linear`/`kv_linear`/`proj`
-are saved in peft layout, so a node costs tens of MB instead of tens of GB.
+**Every node trains from the released base.** Checkpoints are never chained, so the
+archive stores exactly two sets of weights at any time: the immutable base bundle and
+the single newest node's checkpoint. Everything else is deleted the moment a newer one
+lands — nothing older is ever needed again, and disk here has no room to spare.
 
-- trainer: `Sana/train_video_scripts/train_sana_wm_stage1_lora.py`
-- config: `Sana/configs/sana_wm/stage1/sana_wm_stage1_lora_base.yaml`
-- merge at eval: `kernel/runners/wbench_generate.py:merge_lora`
+- trainer: `Sana/train_video_scripts/train_sana_wm_stage1.py` (stock, unmodified)
+- config: `Sana/configs/sana_wm/stage1/sana_wm_stage1_recipe_base.yaml`
+- retention: `kernel/loop.py:Loop._retain` → `archive/current/<node>.pth`
 
+FSDP2 already writes a merged, inference-loadable `.pth` next to the sharded state;
+the kernel keeps that and discards the shards, which only matter for resuming.
+
+What a node inherits from its parent is its **agent code and data recipe**, not weights.
 Training step count is chosen by the agents, scaled to how much data they added.
 
 ## Usage

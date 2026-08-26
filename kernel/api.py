@@ -46,7 +46,7 @@ class ImproveRecipeContext:
     history_path: Path
     memory_dir: Path
     logs_dir: Path
-    baseline_lora: Path | None      # the parent's adapter, to warm-start from
+    base_checkpoint: Path           # the released stage-1 weights; ALWAYS train from these
     wbench_dir: Path                # READ ONLY: benchmark definition, for understanding tasks
     budget_seconds: int = 12 * 3600
     disk_gb: float = 25.0
@@ -55,7 +55,7 @@ class ImproveRecipeContext:
 
 @dataclass
 class ImproveRecipeResult:
-    lora_path: str | None = None            # peft adapter dir produced by training
+    checkpoint_path: str | None = None      # merged .pth produced by training
     recipe: dict = field(default_factory=dict)   # manifest: what data, from where, why
     train: dict = field(default_factory=dict)    # steps, config path, wall-clock
     summary: str = ""

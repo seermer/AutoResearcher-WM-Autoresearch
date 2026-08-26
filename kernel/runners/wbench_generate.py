@@ -2,7 +2,7 @@
 
 Kernel-owned and runs in the `sana` conda env. Agents cannot edit this file, so
 every node is evaluated through an identical generation protocol; only the model
-weights (base + the node's LoRA delta) and the data they were trained on differ.
+weights and the data they were trained on differ.
 
 Protocol: poses come from WBench's own `case_to_poses` (canonical fps=24,
 temporal_compression=4), are interpolated to one pose per RGB frame, and the mp4
@@ -132,7 +132,6 @@ def main() -> None:
     ap.add_argument("--config", default="hf://Efficient-Large-Model/SANA-WM_bidirectional/config.yaml")
     ap.add_argument("--model_path",
                     default="hf://Efficient-Large-Model/SANA-WM_bidirectional/dit/sana_wm_1600m_720p.safetensors")
-    ap.add_argument("--lora", default="", help="peft adapter dir to merge into the DiT")
     ap.add_argument("--weights_root", default="",
                     help="local stage-1 bundle (config.yaml + dit/ + vae/); avoids hub resolution")
     ap.add_argument("--shard", type=int, default=0)
@@ -183,10 +182,6 @@ def main() -> None:
         config=config, model_path=wm.resolve_hf_path(model_path),
         device=torch.device("cuda"), refiner=None,   # stage-1 only
     )
-    if args.lora:
-        n = merge_lora(pipeline.model, Path(args.lora))
-        print(f"[gen] merged LoRA from {args.lora} into {n} modules", flush=True)
-
     sampling_algo = (config.scheduler.vis_sampler
                      if config.scheduler.vis_sampler in {"chunk_flow_euler", "self_forcing"}
                      else "flow_euler_ltx")
@@ -245,41 +240,6 @@ def main() -> None:
     status_path.write_text(json.dumps(results, indent=1))
 
 
-def merge_lora(model, adapter_dir: Path) -> int:
-    """Fold a peft LoRA adapter into the DiT weights in place."""
-    import torch
-    from safetensors.torch import load_file
-
-    cfg = json.loads((adapter_dir / "adapter_config.json").read_text())
-    scale = cfg["lora_alpha"] / cfg["r"]
-    weights_file = adapter_dir / "adapter_model.safetensors"
-    sd = load_file(str(weights_file)) if weights_file.exists() else \
-        torch.load(adapter_dir / "adapter_model.bin", map_location="cpu")
-
-    pairs: dict[str, dict[str, torch.Tensor]] = {}
-    for k, v in sd.items():
-        if ".lora_A" in k:
-            pairs.setdefault(k.split(".lora_A")[0], {})["A"] = v
-        elif ".lora_B" in k:
-            pairs.setdefault(k.split(".lora_B")[0], {})["B"] = v
-
-    modules = dict(model.named_modules())
-    merged = 0
-    for name, ab in pairs.items():
-        if "A" not in ab or "B" not in ab:
-            continue
-        target = name.removeprefix("base_model.model.").removesuffix(".base_layer")
-        mod = modules.get(target)
-        if mod is None or not hasattr(mod, "weight"):
-            print(f"[gen] WARNING: LoRA target not found: {target}", flush=True)
-            continue
-        delta = (ab["B"].to(torch.float32) @ ab["A"].to(torch.float32)) * scale
-        with torch.no_grad():
-            mod.weight.add_(delta.to(mod.weight.device, mod.weight.dtype))
-        merged += 1
-    if merged == 0:
-        raise RuntimeError(f"LoRA merge matched no modules in {adapter_dir}")
-    return merged
 
 
 if __name__ == "__main__":

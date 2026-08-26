@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from . import cmp as cmp_mod
+from . import weights
 from . import selection, vcs
 from .archive import OK, PENDING, TRASH, Archive, Node
 from .config import BUDGET, PATHS
@@ -58,7 +59,9 @@ class Loop:
 
     def _trash(self, node: Node, ws: vcs.NodeWorkspace, reason: str) -> Node:
         node.status, node.failure = TRASH, reason
+        node.checkpoint_path = None
         self.archive.save(node)
+        shutil.rmtree(node.dir / "work", ignore_errors=True)
         ws.trash()
         self.tracer.emit("node.trashed", node=node.id, reason=reason)
         cmp_mod.backpropagate(self.archive, node)
@@ -76,14 +79,14 @@ class Loop:
         ws = vcs.NodeWorkspace(node.id, None).create()
         self.tracer.node_id = node.id
         with self.tracer.span("root.evaluate"):
-            res = self.evaluator.run(node.id, ws.sana, node.dir, lora=None)
+            res = self.evaluator.run(node.id, ws.sana, node.dir, ckpt=None)
         if not res.ok:
             node.status, node.failure = TRASH, res.failure
             self.archive.save(node)
             raise RuntimeError(f"baseline evaluation failed: {res.failure}")
         node.status = OK
         node.score, node.metrics = res.score, res.summary()
-        node.recipe = {"plan": "baseline: released SANA-WM stage-1 teacher, no LoRA"}
+        node.recipe = {"plan": "baseline: released SANA-WM stage-1 teacher, untrained"}
         node.evaluated_at = time.time()
         self.archive.save(node)
         cmp_mod.backpropagate(self.archive, node)
@@ -177,7 +180,7 @@ class Loop:
             node_id=node.id, agents_dir=ws.agents, sana_dir=ws.sana,
             datastore_dir=PATHS.datastore, out_dir=out_dir, history_path=history,
             memory_dir=ws.agents / "agents" / "memory", logs_dir=logs,
-            baseline_lora=Path(parent.lora_path) if parent.lora_path else None,
+            base_checkpoint=weights.ensure_stage1()["dit"],
             wbench_dir=PATHS.wbench, budget_seconds=BUDGET.improve_recipe_seconds,
             disk_gb=min(BUDGET.node_disk_gb, free_disk_gb() - BUDGET.min_free_disk_gb),
             gpus=BUDGET.gpus,
@@ -187,21 +190,20 @@ class Loop:
                                   writable=[ws.sana, PATHS.datastore, out_dir],
                                   readable=[PATHS.nodes, PATHS.wbench],
                                   log_dir=logs, timeout=BUDGET.improve_recipe_seconds)
-        if not res.get("ok", True) or not res.get("lora_path"):
+        if not res.get("ok", True) or not res.get("checkpoint_path"):
             self._trash(node, ws, f"improve_recipe: {res.get('error')}")
             return None
 
         vcs.ensure_committed(ws.sana, f"[{node.id}] recipe: {res.get('summary','')[:120]}")
-        lora = Path(res["lora_path"]).resolve()
-        keep = node.dir / "lora"
-        if keep.exists():
-            shutil.rmtree(keep)
-        shutil.copytree(lora, keep)
-        node.lora_path, node.recipe, node.train = str(keep), res.get("recipe", {}), res.get("train", {})
+        ckpt = self._retain(node, Path(res["checkpoint_path"]))
+        if ckpt is None:
+            self._trash(node, ws, f"checkpoint missing: {res['checkpoint_path']}")
+            return None
+        node.recipe, node.train = res.get("recipe", {}), res.get("train", {})
         self.archive.save(node)
 
         with self.tracer.span("evaluate"):
-            ev = self.evaluator.run(node.id, ws.sana, node.dir, lora=keep)
+            ev = self.evaluator.run(node.id, ws.sana, node.dir, ckpt=ckpt)
         if not ev.ok:
             self._trash(node, ws, f"evaluate: {ev.failure}")
             return None
@@ -210,6 +212,30 @@ class Loop:
         node.evaluated_at = time.time()
         self.archive.save(node)
         return node
+
+    def _retain(self, node: Node, produced: Path) -> Path | None:
+        """Keep exactly one trained checkpoint: this node's. Nodes always train from
+        base, so every older checkpoint is dead weight on a disk that has none to spare."""
+        produced = produced.resolve()
+        if not produced.is_file():
+            return None
+        PATHS.current.mkdir(parents=True, exist_ok=True)
+        dest = PATHS.current / f"{node.id}.pth"
+        shutil.move(str(produced), dest)
+        for old in PATHS.current.iterdir():
+            if old != dest:
+                old.unlink(missing_ok=True) if old.is_file() else shutil.rmtree(old, ignore_errors=True)
+        for other in self.archive.nodes:
+            if other.id != node.id and other.checkpoint_path:
+                other.checkpoint_path, other.checkpoint_evicted = None, True
+                self.archive.save(other)
+        node.checkpoint_path = str(dest)
+        self.archive.save(node)
+        # The sharded FSDP state is only useful for resuming, and we never resume.
+        shutil.rmtree(produced.with_suffix(""), ignore_errors=True)
+        self.tracer.emit("checkpoint.retained", path=str(dest),
+                         gb=round(dest.stat().st_size / 2**30, 2))
+        return dest
 
     # ---------- driver ----------
     def run(self, max_nodes: int | None = None) -> None:
