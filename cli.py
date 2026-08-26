@@ -14,6 +14,7 @@ from kernel.cases import navi_cases, proxy_cases  # noqa: E402
 from kernel.config import BUDGET, EVAL, PATHS  # noqa: E402
 from kernel.evaluate import SANA_PY, WBENCH_PY  # noqa: E402
 from kernel.security import free_disk_gb  # noqa: E402
+from kernel import weights  # noqa: E402
 
 
 def cmd_status(args) -> None:
@@ -53,6 +54,8 @@ def cmd_doctor(args) -> None:
         ("LoRA trainer", (PATHS.sana / "train_video_scripts" / "train_sana_wm_stage1_lora.py").exists()),
         ("LoRA config", (PATHS.sana / "configs" / "sana_wm" / "stage1" / "sana_wm_stage1_lora_base.yaml").exists()),
         ("LLM endpoint set", bool(__import__("os").environ.get("OPENAI_BASE_URL"))),
+        ("stage-1 weights bundle", (weights.bundle_dir() / weights.DIT_FILE).exists()),
+        ("caches off $HOME", not str(__import__("os").environ.get("HF_HOME", "")).startswith(str(Path.home()))),
         (f"disk headroom (>{BUDGET.min_free_disk_gb:.0f} GB)", free_disk_gb() > BUDGET.min_free_disk_gb),
     ]
     for name, good in checks:

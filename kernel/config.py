@@ -41,6 +41,11 @@ class Paths:
     def traces(self) -> Path:
         return self.archive / "traces"
 
+    @property
+    def cache(self) -> Path:
+        """All model/dataset caches live on the workspace disk, never in $HOME."""
+        return _env_path("AR_CACHE_DIR", WORKSPACE / "cache")
+
 
 @dataclass(frozen=True)
 class Budget:
@@ -81,6 +86,33 @@ class EvalCfg:
 
 
 PATHS = Paths()
+
+
+def use_workspace_caches() -> dict:
+    """Force HF, torch and temp files onto the workspace disk.
+
+    The root filesystem here is shared and full, so anything that defaults to
+    $HOME/.cache or /tmp will fail mid-download. Set before any heavy import and
+    inherited by every subprocess the kernel launches.
+    """
+    root = PATHS.cache
+    env = {
+        "HF_HOME": str(root / "huggingface"),
+        "HUGGINGFACE_HUB_CACHE": str(root / "huggingface" / "hub"),
+        "TORCH_HOME": str(root / "torch"),
+        "XDG_CACHE_HOME": str(root / "xdg"),
+        "TMPDIR": str(root / "tmp"),
+        "TRITON_CACHE_DIR": str(root / "triton"),
+    }
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    for key, value in env.items():
+        os.environ.setdefault(key, value)
+        Path(os.environ[key]).mkdir(parents=True, exist_ok=True)
+    return env
+
+
+CACHE_ENV = use_workspace_caches()
+
 BUDGET = Budget()
 SELECTION = Selection()
 EVAL = EvalCfg()

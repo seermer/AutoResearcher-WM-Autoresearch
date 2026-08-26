@@ -51,6 +51,7 @@ def diffstat(repo: Path, base: str = "HEAD~1") -> dict:
 def add_worktree(repo: Path, branch: str, base: str, path: Path) -> Path:
     """Materialize `branch` (created from `base`) as a worktree at `path`."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    git(repo, "worktree", "prune", check=False)   # drop records of deleted checkouts
     if path.exists():
         remove_worktree(repo, path)
     if branch_exists(repo, branch):
@@ -107,6 +108,8 @@ class NodeWorkspace:
     def destroy(self) -> None:
         remove_worktree(PATHS.repo, self.agents)
         remove_worktree(PATHS.sana, self.sana)
+        if self.root.exists() and not any(self.root.iterdir()):
+            self.root.rmdir()
 
     def trash(self) -> None:
         self.destroy()

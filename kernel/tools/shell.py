@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from langchain_core.tools import tool
 
-from ..config import PATHS
-from ..security import SecurityError, is_protected, run
+from ..config import BUDGET, PATHS
+from ..security import SecurityError, free_disk_gb, is_protected, run
 from . import context
 
 DENY = ("rm -rf /", "mkfs", ":(){", "shutdown", "reboot", "dd if=/dev/zero of=/dev")
@@ -19,6 +19,10 @@ def run_shell(command: str, cwd: str = "", timeout: int = 1800) -> str:
     polled, so a single call does not block for hours.
     """
     ctx = context.get()
+    free = free_disk_gb()
+    if free < BUDGET.min_free_disk_gb:
+        return (f"ERROR: refused: only {free:.1f} GB free (floor {BUDGET.min_free_disk_gb:.0f} GB). "
+                f"Delete raw footage you have already encoded, or pick a smaller source.")
     low = command.lower()
     if any(d in low for d in DENY):
         return "ERROR: refused by security policy"

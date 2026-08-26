@@ -25,6 +25,20 @@ TARGET_H, TARGET_W = 704, 1280
 WBENCH_FPS = 24
 
 
+def _use_workspace_caches() -> None:
+    """Keep HF/torch/temp off $HOME — the root filesystem here is shared and full."""
+    root = Path(os.environ.get(
+        "AR_CACHE_DIR", Path(__file__).resolve().parents[3] / "cache"))
+    for key, sub in (("HF_HOME", "huggingface"), ("HUGGINGFACE_HUB_CACHE", "huggingface/hub"),
+                     ("TORCH_HOME", "torch"), ("XDG_CACHE_HOME", "xdg"),
+                     ("TMPDIR", "tmp"), ("TRITON_CACHE_DIR", "triton")):
+        os.environ.setdefault(key, str(root / sub))
+        Path(os.environ[key]).mkdir(parents=True, exist_ok=True)
+
+
+_use_workspace_caches()
+
+
 def load_module(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
@@ -119,6 +133,8 @@ def main() -> None:
     ap.add_argument("--model_path",
                     default="hf://Efficient-Large-Model/SANA-WM_bidirectional/dit/sana_wm_1600m_720p.safetensors")
     ap.add_argument("--lora", default="", help="peft adapter dir to merge into the DiT")
+    ap.add_argument("--weights_root", default="",
+                    help="local stage-1 bundle (config.yaml + dit/ + vae/); avoids hub resolution")
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--num_shards", type=int, default=1)
     ap.add_argument("--duration", type=float, default=4.0, help="seconds per interaction turn")
@@ -133,6 +149,7 @@ def main() -> None:
     sys.path.insert(0, str(sana_root))
     sys.path.insert(0, str(wbench_root))
     os.environ.setdefault("DISABLE_XFORMERS", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
     import cv2
     import torch
@@ -151,10 +168,19 @@ def main() -> None:
     mine = [c for i, c in enumerate(ids) if i % args.num_shards == args.shard]
     cases_dir = wbench_root / "data" / "cases"
 
+    config_path, model_path = args.config, args.model_path
+    if args.weights_root:
+        root = Path(args.weights_root).resolve()
+        config_path = str(root / "config.yaml")
+        model_path = str(root / "dit" / "sana_wm_1600m_720p.safetensors")
     config = pyrallis.parse(config_class=wm.InferenceConfig,
-                            config_path=wm.resolve_hf_path(args.config), args=[])
+                            config_path=wm.resolve_hf_path(config_path), args=[])
+    if args.weights_root:
+        # A local dir keeps diffusers from resolving the repo id and pulling the
+        # 84 GB refiner subtree we never load.
+        config.vae.vae_pretrained = str(Path(args.weights_root).resolve())
     pipeline = wm.SanaWMPipeline(
-        config=config, model_path=wm.resolve_hf_path(args.model_path),
+        config=config, model_path=wm.resolve_hf_path(model_path),
         device=torch.device("cuda"), refiner=None,   # stage-1 only
     )
     if args.lora:

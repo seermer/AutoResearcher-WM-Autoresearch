@@ -8,8 +8,9 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import weights
 from .cases import case_ids, navi_cases, proxy_cases
-from .config import BUDGET, EVAL, PATHS
+from .config import BUDGET, CACHE_ENV, EVAL, PATHS
 from .trace import Tracer
 
 SANA_PY = os.environ.get("AR_SANA_PYTHON", "/home/zhantaoy/miniforge3/envs/sana/bin/python")
@@ -47,7 +48,7 @@ class EvalResult:
 
 def _env_for(conda_python: str, gpus: str) -> dict:
     prefix = str(Path(conda_python).parent.parent)
-    return {"CUDA_VISIBLE_DEVICES": gpus,
+    return {**CACHE_ENV, "CUDA_VISIBLE_DEVICES": gpus,
             "LD_LIBRARY_PATH": f"{prefix}/lib:" + os.environ.get("LD_LIBRARY_PATH", ""),
             "TOKENIZERS_PARALLELISM": "false"}
 
@@ -95,6 +96,8 @@ class Evaluator:
                 cmd += ["--model_path", base_ckpt]
             if config:
                 cmd += ["--config", config]
+            else:
+                cmd += ["--weights_root", str(weights.bundle_dir())]
             if resume:
                 cmd += ["--resume"]
             log = (work_dir / node_id / f"generate_gpu{gpu}.log").open("wb")
@@ -144,6 +147,7 @@ class Evaluator:
         work_dir = out_dir / ("wbench_full" if full else "wbench_proxy")
         work_dir.mkdir(parents=True, exist_ok=True)
         gpus = BUDGET.gpus.split(",")
+        weights.ensure_stage1()
 
         with self.tracer.span("eval.generate", node=node_id, n_cases=len(cases), full=full):
             gen = self.generate(node_id, sana_root, work_dir, cases, lora, gpus,

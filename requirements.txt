@@ -1,0 +1,15 @@
+langgraph>=1.0
+langchain-core>=0.3
+langchain-openai>=0.2
+openai-agents>=0.1
+pydantic>=2
+python-dotenv
+GitPython
+tenacity
+numpy
+httpx
+ddgs
+trafilatura
+pyyaml
+rich
+huggingface_hub
