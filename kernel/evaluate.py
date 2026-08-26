@@ -76,7 +76,7 @@ class Evaluator:
     def generate(self, node_id: str, sana_root: Path, work_dir: Path, cases,
                  lora: Path | None, gpus: list[str], timeout: int,
                  base_ckpt: str | None = None, config: str | None = None,
-                 step: int = 60, resume: bool = True) -> dict:
+                 step: int = 60, duration: float = 4.0, resume: bool = True) -> dict:
         videos = work_dir / node_id / "videos"
         videos.mkdir(parents=True, exist_ok=True)
         ids_path = work_dir / node_id / "cases.json"
@@ -89,7 +89,7 @@ class Evaluator:
                    "--sana_root", str(sana_root), "--wbench_root", str(PATHS.wbench),
                    "--out_dir", str(videos), "--cases", str(ids_path),
                    "--shard", str(shard), "--num_shards", str(len(gpus)),
-                   "--duration", str(EVAL.turn_duration_s), "--step", str(step)]
+                   "--duration", str(duration), "--step", str(step)]
             if lora:
                 cmd += ["--lora", str(lora)]
             if base_ckpt:
@@ -150,8 +150,11 @@ class Evaluator:
         weights.ensure_stage1()
 
         with self.tracer.span("eval.generate", node=node_id, n_cases=len(cases), full=full):
-            gen = self.generate(node_id, sana_root, work_dir, cases, lora, gpus,
-                                timeout=BUDGET.eval_seconds, base_ckpt=base_ckpt, config=config)
+            gen = self.generate(
+                node_id, sana_root, work_dir, cases, lora, gpus,
+                timeout=BUDGET.eval_seconds, base_ckpt=base_ckpt, config=config,
+                step=EVAL.full_step if full else EVAL.proxy_step,
+                duration=EVAL.turn_duration_s if full else EVAL.proxy_turn_duration_s)
         self.tracer.emit("eval.generated", **gen)
         if gen["produced"] < MIN_CASE_SUCCESS * gen["expected"]:
             return EvalResult(ok=False, seconds=time.time() - t0,

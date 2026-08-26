@@ -75,7 +75,12 @@ class EvalCfg:
     split: str = "navi"
     proxy_cases: int = int(os.environ.get("AR_PROXY_CASES", 32))
     proxy_seed: int = 20260826
+    # The proxy rung only has to *rank* nodes, so it generates shorter clips with
+    # fewer sampling steps. The full 158-case promotion eval uses canonical settings.
     turn_duration_s: float = 4.0
+    proxy_turn_duration_s: float = float(os.environ.get("AR_PROXY_TURN_SECONDS", 2.0))
+    proxy_step: int = int(os.environ.get("AR_PROXY_STEP", 30))
+    full_step: int = int(os.environ.get("AR_FULL_STEP", 60))
     # VLM metrics need a Doubao/ARK key; skipped (not removed) when absent.
     gpu_metrics: tuple[str, ...] = ("quality", "consistency")
     vlm_metrics: tuple[str, ...] = ("setting", "interaction", "physical")

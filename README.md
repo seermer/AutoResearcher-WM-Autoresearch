@@ -62,8 +62,21 @@ model is sampled, "improvement is data-driven" would not be enforceable.
 
 ## Evaluation
 
-- Proxy rung: **32 navigation cases**, stratified over all 12
-  (scene category × perspective) strata, deterministic given `(n, seed)`.
+Two rungs. The proxy only has to *rank* nodes, so it is deliberately cheaper; the
+full eval is the promotion gate and uses canonical settings.
+
+| | cases | seconds/turn | DiT steps | generation on 8xA100 |
+|---|---|---|---|---|
+| proxy (every node) | 32, stratified | 2.0 | 30 | ~10 min |
+| full (`eval --full`) | 158 | 4.0 | 60 | ~3 h |
+
+Measured: one 6-turn case at 573 frames / 60 steps takes 804 s on a single A100.
+Cost scales roughly with frames x steps, so the proxy settings cut it ~4x per case.
+WBench's own metric phases (SAM2 + DA3 + MegaSAM precompute, then GPU metrics) run
+on top of that.
+
+- The 32 proxy cases are stratified over all 12 (scene category × perspective)
+  strata and deterministic given `(n, seed)`.
 - Generation is kernel-owned (`runners/wbench_generate.py`), so every node is
   measured through an identical protocol — only weights and data differ. Poses
   come from WBench's own `case_to_poses`, are slerp-interpolated to one pose per
