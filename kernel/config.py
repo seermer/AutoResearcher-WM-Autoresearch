@@ -86,6 +86,9 @@ class EvalCfg:
     turn_duration_s: float = 4.0
     proxy_turn_duration_s: float = float(os.environ.get("AR_PROXY_TURN_SECONDS", 2.0))
     proxy_step: int = int(os.environ.get("AR_PROXY_STEP", 30))
+    # Stage-1 inference peaks around 33 GB on a full-length case; set this on hosts
+    # whose GPUs are smaller than that.
+    offload_vae: bool = os.environ.get("AR_OFFLOAD_VAE", "0") not in ("0", "", "false")
     full_step: int = int(os.environ.get("AR_FULL_STEP", 60))
     # VLM metrics need a Doubao/ARK key; skipped (not removed) when absent.
     gpu_metrics: tuple[str, ...] = ("quality", "consistency")

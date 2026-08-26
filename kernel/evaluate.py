@@ -111,6 +111,8 @@ def gen_cmd(sana_root: Path, videos: Path, ids_path: Path, shard: int, num_shard
         cmd += ["--config", config]
     if resume:
         cmd += ["--resume"]
+    if EVAL.offload_vae:
+        cmd += ["--offload_vae"]
     return cmd
 
 

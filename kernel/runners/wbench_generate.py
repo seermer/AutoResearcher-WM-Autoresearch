@@ -142,6 +142,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max_frames", type=int, default=0, help="cap frames per case (0 = full)")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--offload_vae", action="store_true",
+                    help="keep the VAE on CPU between encode/decode; needed under ~24GB")
     args = ap.parse_args()
 
     sana_root, wbench_root = Path(args.sana_root).resolve(), Path(args.wbench_root).resolve()
@@ -188,6 +190,7 @@ def main() -> None:
     pipeline = wm.SanaWMPipeline(
         config=config, model_path=wm.resolve_hf_path(model_path),
         device=torch.device("cuda"), refiner=None,   # stage-1 only
+        offload_vae=args.offload_vae,
     )
     sampling_algo = (config.scheduler.vis_sampler
                      if config.scheduler.vis_sampler in {"chunk_flow_euler", "self_forcing"}
