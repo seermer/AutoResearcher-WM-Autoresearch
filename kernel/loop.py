@@ -145,15 +145,18 @@ class Loop:
                                   readable=[PATHS.nodes, PATHS.sana, PATHS.wbench],
                                   log_dir=logs, timeout=BUDGET.edit_self_seconds)
         if not res.get("ok", True):
-            return self._trash(node, ws, f"edit_self: {res.get('error')}") and None
+            self._trash(node, ws, f"edit_self: {res.get('error')}")
+            return None
 
         sha = vcs.ensure_committed(ws.agents, f"[{node.id}] edit_self: {res.get('summary','')[:120]}")
         if sha is None:
-            return self._trash(node, ws, "edit_self produced no diff") and None
+            self._trash(node, ws, "edit_self produced no diff")
+            return None
         stat = vcs.diffstat(ws.agents)
         contract = verify(ws.agents, stat["files"])
         if not contract:
-            return self._trash(node, ws, f"contract: {contract.reason}") and None
+            self._trash(node, ws, f"contract: {contract.reason}")
+            return None
 
         node.self_edit = {"summary": res.get("summary", ""), "hypothesis": res.get("hypothesis", ""),
                           "sha": sha, **{k: stat[k] for k in ("files", "insertions", "deletions")}}
@@ -185,7 +188,8 @@ class Loop:
                                   readable=[PATHS.nodes, PATHS.wbench],
                                   log_dir=logs, timeout=BUDGET.improve_recipe_seconds)
         if not res.get("ok", True) or not res.get("lora_path"):
-            return self._trash(node, ws, f"improve_recipe: {res.get('error')}") and None
+            self._trash(node, ws, f"improve_recipe: {res.get('error')}")
+            return None
 
         vcs.ensure_committed(ws.sana, f"[{node.id}] recipe: {res.get('summary','')[:120]}")
         lora = Path(res["lora_path"]).resolve()
@@ -199,7 +203,8 @@ class Loop:
         with self.tracer.span("evaluate"):
             ev = self.evaluator.run(node.id, ws.sana, node.dir, lora=keep)
         if not ev.ok:
-            return self._trash(node, ws, f"evaluate: {ev.failure}") and None
+            self._trash(node, ws, f"evaluate: {ev.failure}")
+            return None
 
         node.status, node.score, node.metrics = OK, ev.score, ev.summary()
         node.evaluated_at = time.time()
