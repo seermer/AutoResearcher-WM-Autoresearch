@@ -129,9 +129,9 @@ def main() -> None:
     ap.add_argument("--wbench_root", required=True)
     ap.add_argument("--out_dir", required=True, help="work_dirs/<model>/videos")
     ap.add_argument("--cases", required=True, help="JSON file: list of case ids")
-    ap.add_argument("--config", default="hf://Efficient-Large-Model/SANA-WM_bidirectional/config.yaml")
-    ap.add_argument("--model_path",
-                    default="hf://Efficient-Large-Model/SANA-WM_bidirectional/dit/sana_wm_1600m_720p.safetensors")
+    ap.add_argument("--config", default="")
+    ap.add_argument("--model_path", default="",
+                    help="DiT weights to evaluate; empty falls back to the base in --weights_root")
     ap.add_argument("--weights_root", default="",
                     help="local stage-1 bundle (config.yaml + dit/ + vae/); avoids hub resolution")
     ap.add_argument("--shard", type=int, default=0)
@@ -167,11 +167,18 @@ def main() -> None:
     mine = [c for i, c in enumerate(ids) if i % args.num_shards == args.shard]
     cases_dir = wbench_root / "data" / "cases"
 
+    # --weights_root supplies the config and the VAE; --model_path, when given, is the
+    # node's trained checkpoint and MUST win. Letting the bundle override it would
+    # silently evaluate every node on base weights and make all scores identical.
     config_path, model_path = args.config, args.model_path
     if args.weights_root:
         root = Path(args.weights_root).resolve()
-        config_path = str(root / "config.yaml")
-        model_path = str(root / "dit" / "sana_wm_1600m_720p.safetensors")
+        config_path = config_path or str(root / "config.yaml")
+        model_path = model_path or str(root / "dit" / "sana_wm_1600m_720p.safetensors")
+    config_path = config_path or "hf://Efficient-Large-Model/SANA-WM_bidirectional/config.yaml"
+    if not model_path:
+        raise SystemExit("need --model_path or --weights_root")
+    print(f"[gen] weights: {model_path}", flush=True)
     config = pyrallis.parse(config_class=wm.InferenceConfig,
                             config_path=wm.resolve_hf_path(config_path), args=[])
     if args.weights_root:

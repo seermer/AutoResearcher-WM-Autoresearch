@@ -93,6 +93,27 @@ def score_from_report(report: dict, split: str = "navi",
     return score, dims, metrics, missing
 
 
+def gen_cmd(sana_root: Path, videos: Path, ids_path: Path, shard: int, num_shards: int,
+            duration: float, step: int, ckpt: Path | None, base_ckpt: str | None,
+            config: str | None, resume: bool) -> list[str]:
+    """Build one generation shard's argv. Pure, so the weight selection is testable."""
+    cmd = [SANA_PY, str(PATHS.repo / "kernel" / "runners" / "wbench_generate.py"),
+           "--sana_root", str(sana_root), "--wbench_root", str(PATHS.wbench),
+           "--out_dir", str(videos), "--cases", str(ids_path),
+           "--shard", str(shard), "--num_shards", str(num_shards),
+           "--duration", str(duration), "--step", str(step),
+           "--weights_root", str(weights.bundle_dir())]
+    if ckpt:
+        cmd += ["--model_path", str(ckpt)]
+    elif base_ckpt:
+        cmd += ["--model_path", base_ckpt]
+    if config:
+        cmd += ["--config", config]
+    if resume:
+        cmd += ["--resume"]
+    return cmd
+
+
 class Evaluator:
     """Runs the fixed WBench protocol against a node's LoRA delta."""
 
@@ -109,24 +130,10 @@ class Evaluator:
         ids_path = work_dir / node_id / "cases.json"
         ids_path.write_text(json.dumps(case_ids(cases)))
 
-        runner = PATHS.repo / "kernel" / "runners" / "wbench_generate.py"
         procs = []
         for shard, gpu in enumerate(gpus):
-            cmd = [SANA_PY, str(runner),
-                   "--sana_root", str(sana_root), "--wbench_root", str(PATHS.wbench),
-                   "--out_dir", str(videos), "--cases", str(ids_path),
-                   "--shard", str(shard), "--num_shards", str(len(gpus)),
-                   "--duration", str(duration), "--step", str(step)]
-            if ckpt:
-                cmd += ["--model_path", str(ckpt)]
-            elif base_ckpt:
-                cmd += ["--model_path", base_ckpt]
-            if config:
-                cmd += ["--config", config]
-            else:
-                cmd += ["--weights_root", str(weights.bundle_dir())]
-            if resume:
-                cmd += ["--resume"]
+            cmd = gen_cmd(sana_root, videos, ids_path, shard, len(gpus), duration, step,
+                          ckpt, base_ckpt, config, resume)
             log = (work_dir / node_id / f"generate_gpu{gpu}.log").open("wb")
             procs.append((subprocess.Popen(cmd, cwd=str(sana_root), stdout=log,
                                            stderr=subprocess.STDOUT, start_new_session=True,

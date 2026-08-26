@@ -133,6 +133,17 @@ def main() -> None:
     check(f"selection favours a top-CMP node (picked {top}, cmp rank "
           f"{ranked.index(top)+1}/{len(ranked)})", top in ranked[:2])
 
+    # Regression guard: --weights_root once clobbered --model_path, which would have
+    # evaluated every node on base weights and made all scores identical.
+    from kernel.evaluate import gen_cmd
+    c = gen_cmd(ROOT, ARCHIVE / "v", ARCHIVE / "ids.json", 0, 8, 2.0, 30,
+                Path("/node/ckpt.pth"), None, None, True)
+    check("node checkpoint reaches the generator", "--model_path" in c and
+          c[c.index("--model_path") + 1] == "/node/ckpt.pth")
+    check("weights bundle still passed alongside it", "--weights_root" in c)
+    base = gen_cmd(ROOT, ARCHIVE / "v", ARCHIVE / "ids.json", 0, 8, 2.0, 30, None, None, None, True)
+    check("root node falls back to base weights", "--model_path" not in base)
+
     print("\n  tree:")
     for n in sorted(a.nodes, key=lambda x: x.id):
         print(f"    {n.id} {n.status:5s} score={n.score} cmp={n.cmp:.3f} "
