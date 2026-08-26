@@ -99,6 +99,8 @@ lands — nothing older is ever needed again, and disk here has no room to spare
 
 FSDP2 already writes a merged, inference-loadable `.pth` next to the sharded state;
 the kernel keeps that and discards the shards, which only matter for resuming.
+Measured: merged checkpoint **9.9 GB**, shard directory **30 GB** (transient, deleted
+after evaluation). Budget ~40 GB of headroom for the moment a save lands.
 
 What a node inherits from its parent is its **agent code and data recipe**, not weights.
 Training step count is chosen by the agents, scaled to how much data they added.
