@@ -16,7 +16,7 @@ from pathlib import Path
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--worktree", required=True)
+    ap.add_argument("--worktree", required=True, help="checkout the agent code RUNS from")
     ap.add_argument("--kernel_root", required=True)
     ap.add_argument("--phase", required=True, choices=["edit_self", "improve_recipe"])
     ap.add_argument("--ctx", required=True)

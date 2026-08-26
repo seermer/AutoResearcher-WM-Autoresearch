@@ -50,6 +50,42 @@ This is re-verified programmatically after every self-edit.
 4. **Backpropagate** — push the result up through every ancestor.
 5. **Insert** — the child becomes a node; repeat.
 
+## Node isolation
+
+Finishing a node freezes it. A child can read everything its parent had and change
+none of it.
+
+| asset | how a child gets it | why the parent is safe |
+|---|---|---|
+| agent code | git worktree on a new branch off the parent's | separate checkout; parent's branch is never checked out for writing |
+| WM codebase | same, in the Sana repo | same |
+| training data | symlink farm into `datastore/shards/` | shards are content-addressed and `chmod a-w`; writes through a link fail |
+| new data | node-private `data/staging/` | sealed into the store only on success, then immutable too |
+| checkpoint | trained from base, never from the parent | nothing to share |
+
+`Node.shards` is the data manifest — a list of shard ids. A child starts from a copy of
+its parent's list and appends whatever it sealed, so lineage is recorded without copying
+a 220 GB corpus. The base corpus is registered once as `base-sekai`, by reference.
+
+## Crash safety
+
+Self-editing is the dangerous part: an agent rewriting the package its own interpreter
+loaded can pull in a half-written module or a truncated prompt.
+
+- `edit_self` **runs from a frozen detached worktree at the parent's commit** and
+  **writes to a separate draft worktree** on the child's branch. The code being executed
+  and the code being edited are different directories on disk, so a partial write can
+  never reach the running process. The frozen snapshot is released once edit_self returns.
+- `improve_recipe` then runs from the child's committed code, which nothing writes to
+  during that phase (its writable roots are the Sana worktree, staging, and the out dir).
+- Agents run in a **separate process** (`kernel/runners/agent_host.py`) with a timeout and
+  their own process group, so a hang or a segfault is contained.
+- `Loop.step()` catches everything below `SecurityError`: the node is trashed with the
+  reason recorded and the loop continues. Five consecutive kernel-level crashes halt it.
+- `Loop.recover()` runs before every `run()`: nodes left `PENDING` by a killed process are
+  trashed, their worktrees removed, their partial checkpoints reclaimed, and both repos
+  pruned of stale worktree records.
+
 ## What agents may and may not touch
 
 | | |

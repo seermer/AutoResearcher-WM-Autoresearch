@@ -10,6 +10,9 @@ SANA-WM's score on the WBench navigation split.
   - trainer: `train_video_scripts/train_sana_wm_stage1.py`
   - baseline config: `configs/sana_wm/stage1/sana_wm_stage1_recipe_base.yaml`
   - launch: `torchrun --nproc_per_node=8 train_video_scripts/train_sana_wm_stage1.py --config_path <cfg>`
+  - a small-GPU variant that fits 4x24GB ships as
+    `configs/sana_wm/stage1/sana_wm_stage1_recipe_lowmem.yaml`; its header explains
+    which knobs buy which memory.
   - training writes a merged, inference-loadable checkpoint at
     `<work_dir>/checkpoints/epoch_<E>_step_<S>.pth`; report that path.
 - Data is LATENT-CACHED. The loader `SanaWMZipLatentDataset` pairs, per shard:
@@ -21,8 +24,22 @@ SANA-WM's score on the WBench navigation split.
   Any new data must be materialised in this layout, which means VAE-encoding it with
   the LTX-2 VAE at 704x1280. Latents cost ~22 MB per 961-frame clip; raw video is
   ~114 MB, so delete raw footage after encoding.
-- The base corpus is Sekai-Game: ~1,600 clips of 961 frames at 16fps, already local
-  and symlinked into your worktree at `data/`.
+- The base corpus is Sekai-Game: ~1,600 clips of 961 frames at 16fps.
+
+## Data isolation — read this before touching data
+Your `data/` directory is a farm of symlinks into an **immutable shard store**. Those
+shards are what your ancestors trained on and they are read-only on disk; attempting to
+write through one will fail, and that is deliberate.
+
+- To add data, create `data/staging/<your_corpus_name>/` and build the shard there
+  (raw zip + latent zip + `_camera.npz` + caption sidecars, as described above).
+- Reference it from your config as `data/staging/<name>` while you iterate.
+- If your node succeeds, the kernel seals every directory under `data/staging/` into the
+  store, tagged with your node id and recipe, and your descendants inherit it by name.
+  If your node fails, staging is discarded and nothing else is affected.
+- Never modify or delete an existing shard. Re-filtering or re-captioning means writing a
+  NEW shard (and pointing `caption_proportion` / `external_data_filter` at it), not editing
+  one in place.
 
 ## The benchmark you are optimising (read only, never modify)
 WBench navigation: 158 cases, mostly 4 turns of W/A/S/D/arrow actions, scored over

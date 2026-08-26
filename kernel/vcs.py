@@ -48,6 +48,16 @@ def diffstat(repo: Path, base: str = "HEAD~1") -> dict:
     return {"files": files, "insertions": ins, "deletions": dels}
 
 
+def add_detached_worktree(repo: Path, commitish: str, path: Path) -> Path:
+    """A read-only checkout at a commit. Detached so it never claims a branch."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    git(repo, "worktree", "prune", check=False)
+    if path.exists():
+        remove_worktree(repo, path)
+    git(repo, "worktree", "add", "--detach", str(path), commitish)
+    return path
+
+
 def add_worktree(repo: Path, branch: str, base: str, path: Path) -> Path:
     """Materialize `branch` (created from `base`) as a worktree at `path`."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,7 +99,15 @@ class NodeWorkspace:
 
     @property
     def agents(self) -> Path:
+        """Writable draft: the child's branch. edit_self writes here."""
         return self.root / "agents"
+
+    @property
+    def agents_frozen(self) -> Path:
+        """Immutable snapshot of the PARENT's agent code. edit_self *runs* from here,
+        so an agent rewriting its own package cannot corrupt the interpreter that is
+        executing it mid-run (a half-written module, a truncated prompt file)."""
+        return self.root / "agents_frozen"
 
     @property
     def sana(self) -> Path:
@@ -102,11 +120,16 @@ class NodeWorkspace:
             git(PATHS.sana, "rev-parse", "HEAD")
         add_worktree(PATHS.repo, self.branch, agent_base, self.agents)
         add_worktree(PATHS.sana, self.branch, sana_base, self.sana)
-        link_shared_data(self.sana)
+        add_detached_worktree(PATHS.repo, agent_base, self.agents_frozen)
         return self
+
+    def release_frozen(self) -> None:
+        """Drop the read-only snapshot once edit_self is done with it."""
+        remove_worktree(PATHS.repo, self.agents_frozen)
 
     def destroy(self) -> None:
         remove_worktree(PATHS.repo, self.agents)
+        remove_worktree(PATHS.repo, self.agents_frozen)
         remove_worktree(PATHS.sana, self.sana)
         if self.root.exists() and not any(self.root.iterdir()):
             self.root.rmdir()
@@ -117,21 +140,13 @@ class NodeWorkspace:
         to_trash(PATHS.sana, self.nid)
 
 
-def link_shared_data(sana_worktree: Path) -> None:
-    """Wire a Sana worktree to the shared read-only corpus and the append-only datastore.
+def link_node_data(sana_worktree: Path, manifest: list[str]) -> list[str]:
+    """Build a node's `data/` from its shard manifest.
 
-    `data/` is gitignored, so each worktree starts empty. Base shards are symlinked
-    (never copied, never mutated); anything an agent creates goes in `data/store`,
-    which is content-addressed and shared so latents are not duplicated per node.
+    `data/` is gitignored, so each worktree starts empty. Shards are symlinked from
+    the immutable store and are read-only on disk, so a node cannot write through to
+    what its parent trained on. New data goes in the node-private `data/staging/`,
+    which the kernel seals into the store only if the node succeeds.
     """
-    data = sana_worktree / "data"
-    data.mkdir(parents=True, exist_ok=True)
-    base = PATHS.sana / "data"
-    for child in sorted(base.iterdir()) if base.exists() else []:
-        link = data / child.name
-        if not link.exists() and not link.is_symlink():
-            link.symlink_to(child.resolve())
-    PATHS.datastore.mkdir(parents=True, exist_ok=True)
-    store = data / "store"
-    if not store.exists() and not store.is_symlink():
-        store.symlink_to(PATHS.datastore.resolve())
+    from . import datastore
+    return datastore.materialize(manifest, sana_worktree / "data")

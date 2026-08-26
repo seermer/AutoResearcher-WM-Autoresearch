@@ -13,8 +13,9 @@ A shard is unusable unless both exist and the keys match.
    poses the camera branch gets no supervision and navigation metrics will not move.
 4. Write at least one caption sidecar `<shard>_<suffix>.json` and reference the suffix
    from `external_caption_suffixes` + `caption_proportion`.
-5. Put the shard in the shared datastore and symlink it under `data/`, so sibling
-   nodes reuse it instead of re-encoding.
+5. Build the shard under `data/staging/<name>/`. Do not touch anything already under
+   `data/` — those are immutable shards your ancestors trained on. The kernel seals
+   staging into the shared store if your node succeeds.
 6. Delete the raw footage once latents verify — raw is ~5x the size of latents.
 
 Verify before training: instantiate `SanaWMZipLatentDataset` with your config and pull

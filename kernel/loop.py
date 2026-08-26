@@ -7,12 +7,13 @@ import os
 import random
 import shutil
 import subprocess
+import traceback
 import sys
 import time
 from pathlib import Path
 
 from . import cmp as cmp_mod
-from . import weights
+from . import datastore, weights
 from . import selection, vcs
 from .archive import OK, PENDING, TRASH, Archive, Node
 from .config import BUDGET, PATHS
@@ -77,6 +78,9 @@ class Loop:
                     sana_branch=vcs.NODE_BRANCH.format(nid="n0000"))
         self.archive.add(node)
         ws = vcs.NodeWorkspace(node.id, None).create()
+        node.shards = [datastore.register_base()]
+        vcs.link_node_data(ws.sana, node.shards)
+        self.archive.save(node)
         self.tracer.node_id = node.id
         with self.tracer.span("root.evaluate"):
             res = self.evaluator.run(node.id, ws.sana, node.dir, ckpt=None)
@@ -93,8 +97,49 @@ class Loop:
         self.tracer.emit("root.ready", score=node.score)
         return node
 
+    # ---------- recovery ----------
+    def recover(self) -> list[str]:
+        """Clean up after a crashed run before doing anything else.
+
+        A node left PENDING means the process died mid-iteration: its worktrees may
+        still exist, its branches are half-built, and its work dir may hold a partial
+        10 GB checkpoint. Trash them and prune both repos so the next step starts clean.
+        """
+        stale = [n for n in self.archive.nodes if n.status == PENDING]
+        for node in stale:
+            ws = vcs.NodeWorkspace(node.id, node.parent)
+            self._trash(node, ws, "abandoned by a previous run")
+        for repo in (PATHS.repo, PATHS.sana):
+            vcs.git(repo, "worktree", "prune", check=False)
+        # Worktree directories with no live node behind them.
+        live = {n.id for n in self.archive.nodes if n.status != TRASH}
+        if PATHS.worktrees.exists():
+            for d in PATHS.worktrees.iterdir():
+                if d.is_dir() and d.name not in live:
+                    vcs.NodeWorkspace(d.name, None).destroy()
+        if stale:
+            self.tracer.emit("loop.recovered", nodes=[n.id for n in stale])
+        return [n.id for n in stale]
+
     # ---------- one iteration ----------
     def step(self) -> Node | None:
+        """One iteration. Never raises for a node-level failure; the node is trashed."""
+        try:
+            return self._step()
+        except SecurityError:
+            raise
+        except KeyboardInterrupt:
+            raise
+        except BaseException as e:  # noqa: BLE001 - the outer loop must survive anything
+            self.tracer.emit("step.crashed", error=f"{type(e).__name__}: {e}",
+                             trace=traceback.format_exc()[-4000:])
+            self.archive.reload()
+            for node in [n for n in self.archive.nodes if n.status == PENDING]:
+                self._trash(node, vcs.NodeWorkspace(node.id, node.parent),
+                            f"kernel crash: {type(e).__name__}: {e}")
+            return None
+
+    def _step(self) -> Node | None:
         assert_disk_headroom()
         parent = selection.select(self.archive, self.rng)
         if parent is None:
@@ -111,6 +156,9 @@ class Loop:
                     sana_branch=vcs.NODE_BRANCH.format(nid=nid))
         self.archive.add(node)
         ws = vcs.NodeWorkspace(nid, parent.id).create()
+        node.shards = list(parent.shards)
+        vcs.link_node_data(ws.sana, node.shards)
+        self.archive.save(node)
         logs = node.dir / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         history = self.archive.history_jsonl(parent.id, node.dir / "history.jsonl")
@@ -142,11 +190,15 @@ class Loop:
             parent_score=parent.score, parent_metrics=parent.metrics,
             budget_seconds=BUDGET.edit_self_seconds,
         )
+        # Runs from the frozen parent snapshot, writes into the child's draft. An agent
+        # rewriting its own package therefore cannot pull a half-written module or a
+        # truncated prompt into the interpreter that is executing it.
         with self.tracer.span("edit_self"):
-            res = self._run_agent("edit_self", ws.agents, ctx,
+            res = self._run_agent("edit_self", ws.agents_frozen, ctx,
                                   writable=[ws.agents / "agents"],
-                                  readable=[PATHS.nodes, PATHS.sana, PATHS.wbench],
+                                  readable=[PATHS.nodes, PATHS.sana, PATHS.wbench, ws.agents_frozen],
                                   log_dir=logs, timeout=BUDGET.edit_self_seconds)
+        ws.release_frozen()
         if not res.get("ok", True):
             self._trash(node, ws, f"edit_self: {res.get('error')}")
             return None
@@ -195,6 +247,16 @@ class Loop:
             return None
 
         vcs.ensure_committed(ws.sana, f"[{node.id}] recipe: {res.get('summary','')[:120]}")
+        try:
+            new_shards = datastore.seal_staging(
+                ws.sana / "data" / "staging", node.id,
+                {"recipe": (res.get("recipe") or {}).get("plan", "")[:200]})
+        except Exception as e:  # noqa: BLE001 - a bad shard must not kill the run
+            self.tracer.emit("datastore.seal_failed", error=f"{type(e).__name__}: {e}")
+            new_shards = []
+        if new_shards:
+            node.shards = list(node.shards) + new_shards
+            self.tracer.emit("datastore.sealed", shards=new_shards)
         ckpt = self._retain(node, Path(res["checkpoint_path"]))
         if ckpt is None:
             self._trash(node, ws, f"checkpoint missing: {res['checkpoint_path']}")
@@ -239,9 +301,10 @@ class Loop:
 
     # ---------- driver ----------
     def run(self, max_nodes: int | None = None) -> None:
+        self.recover()
         self.bootstrap()
         budget = max_nodes or BUDGET.max_nodes
-        done = 0
+        done = crashes = 0
         while done < budget:
             try:
                 node = self.step()
@@ -250,8 +313,16 @@ class Loop:
                 print(f"halting: {e}")
                 return
             if node is None:
-                self.tracer.emit("loop.halt", reason="no expandable node")
-                return
+                if not selection.expandable(self.archive):
+                    self.tracer.emit("loop.halt", reason="no expandable node")
+                    return
+                crashes += 1
+                if crashes >= 5:
+                    self.tracer.emit("loop.halt", reason="5 consecutive kernel crashes")
+                    print("halting: 5 consecutive kernel crashes; see the trace")
+                    return
+                continue
+            crashes = 0
             done += 1
             best = self.archive.best()
             print(f"[{done}/{budget}] {node.id} status={node.status} score={node.score} "
