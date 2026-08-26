@@ -14,6 +14,7 @@ from . import memory
 from .llm import chat
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
+SKILLS = Path(__file__).resolve().parent / "skills"
 STEP_LIMIT = 40
 OUTPUT_CHARS = 4000
 
@@ -28,8 +29,24 @@ def extra_tools() -> list:
         return []
 
 
+def skill_index() -> str:
+    """Filename + first line of each playbook. Bodies are read on demand, not inlined."""
+    rows = []
+    for f in sorted(SKILLS.glob("*.md")):
+        if f.name == "README.md":
+            continue
+        first = next((l.strip() for l in f.read_text().splitlines() if l.strip()), "")
+        rows.append(f"- `{f}` — {first[:110]}")
+    if not rows:
+        return ""
+    return ("## Skills available\nRead one with read_file when it applies; "
+            "add a new one when a procedure has worked twice.\n" + "\n".join(rows))
+
+
 def system_prompt(role: str, memory_dir: Path | None = None, extra: str = "") -> str:
     parts = [(PROMPTS / "common.md").read_text(), (PROMPTS / f"{role}.md").read_text()]
+    if index := skill_index():
+        parts.append(index)
     if memory_dir:
         digest = memory.digest(Path(memory_dir))
         if digest:
