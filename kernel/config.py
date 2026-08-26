@@ -1,0 +1,95 @@
+"""Kernel configuration. Not editable by agents."""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE = REPO_ROOT.parent
+load_dotenv(REPO_ROOT / ".env")
+
+
+def _env_path(key: str, default: Path) -> Path:
+    return Path(os.environ.get(key, str(default))).expanduser().resolve()
+
+
+@dataclass(frozen=True)
+class Paths:
+    repo: Path = REPO_ROOT
+    workspace: Path = WORKSPACE
+    sana: Path = field(default_factory=lambda: _env_path("AR_SANA_DIR", WORKSPACE / "Sana"))
+    wbench: Path = field(default_factory=lambda: _env_path("AR_WBENCH_DIR", WORKSPACE / "WBench"))
+    archive: Path = field(default_factory=lambda: _env_path("AR_ARCHIVE_DIR", WORKSPACE / "archive"))
+
+    @property
+    def nodes(self) -> Path:
+        return self.archive / "nodes"
+
+    @property
+    def worktrees(self) -> Path:
+        return self.archive / "worktrees"
+
+    @property
+    def datastore(self) -> Path:
+        """Content-addressed store shared across nodes (latents, videos, captions)."""
+        return self.archive / "datastore"
+
+    @property
+    def traces(self) -> Path:
+        return self.archive / "traces"
+
+
+@dataclass(frozen=True)
+class Budget:
+    max_nodes: int = int(os.environ.get("AR_MAX_NODES", 1000))
+    edit_self_seconds: int = int(os.environ.get("AR_EDIT_SELF_SECONDS", 3600))
+    improve_recipe_seconds: int = int(os.environ.get("AR_IMPROVE_SECONDS", 12 * 3600))
+    eval_seconds: int = int(os.environ.get("AR_EVAL_SECONDS", 6 * 3600))
+    # Agents choose their own training steps; the kernel caps only wall-clock and disk.
+    node_disk_gb: float = float(os.environ.get("AR_NODE_DISK_GB", 25))
+    min_free_disk_gb: float = float(os.environ.get("AR_MIN_FREE_DISK_GB", 40))
+    gpus: str = os.environ.get("AR_GPUS", "0,1,2,3,4,5,6,7")
+
+
+@dataclass(frozen=True)
+class Selection:
+    """Thompson sampling over clade-metaproductivity."""
+    clade_decay: float = 0.9        # descendant weight per level below the node
+    count_failures: bool = True     # failed children contribute x=0 at reduced weight
+    failure_weight: float = 0.5
+    prior_alpha: float = 1.0
+    prior_beta: float = 1.0
+    softness: float = 2.0           # score points mapping to ~1 logit of normalized gain
+
+
+@dataclass(frozen=True)
+class EvalCfg:
+    split: str = "navi"
+    proxy_cases: int = int(os.environ.get("AR_PROXY_CASES", 32))
+    proxy_seed: int = 20260826
+    turn_duration_s: float = 4.0
+    # VLM metrics need a Doubao/ARK key; skipped (not removed) when absent.
+    gpu_metrics: tuple[str, ...] = ("quality", "consistency")
+    vlm_metrics: tuple[str, ...] = ("setting", "interaction", "physical")
+
+    @property
+    def vlm_enabled(self) -> bool:
+        return bool(os.environ.get("VLM_API_KEY"))
+
+
+PATHS = Paths()
+BUDGET = Budget()
+SELECTION = Selection()
+EVAL = EvalCfg()
+
+# Paths agents may never write to.
+# Relative names, enforced inside agent checkouts only.
+PROTECTED_RELATIVE = ("kernel", ".git", ".env")
+# Whole trees that are off limits everywhere: the benchmark.
+PROTECTED_ABSOLUTE = (PATHS.wbench,)
+# Sana subtrees agents may not change. Improvement must come from data, so the
+# training path is editable and the inference path is not.
+PROTECTED_SANA_SUBPATHS = ("inference_video_scripts",)
