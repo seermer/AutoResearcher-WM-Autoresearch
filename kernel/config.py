@@ -98,6 +98,13 @@ class EvalCfg:
     def vlm_enabled(self) -> bool:
         return bool(os.environ.get("VLM_API_KEY"))
 
+    def vlm_metrics_names(self) -> tuple[str, ...]:
+        """Metric names that only a VLM can produce; expected to be absent without a key."""
+        if self.vlm_enabled:
+            return ()
+        return ("event_edit_adherence", "subject_action_adherence", "perspective_switch_adherence",
+                "scene_adherence", "subject_adherence", "visual_plausibility", "causal_fidelity")
+
 
 PATHS = Paths()
 

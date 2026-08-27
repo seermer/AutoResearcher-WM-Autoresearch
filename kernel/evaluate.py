@@ -70,7 +70,10 @@ def pinned_metrics() -> list[str] | None:
 
 
 def pin_metrics(metrics: dict) -> list[str]:
-    names = sorted(metrics)
+    # Only metrics that feed a dimension. Pinning one that no dimension scores would
+    # fail a node for losing a number that could not have changed its score.
+    scored = {m for names in DIMENSIONS.values() for m in names}
+    names = sorted(set(metrics) & scored)
     metric_set_path().parent.mkdir(parents=True, exist_ok=True)
     metric_set_path().write_text(json.dumps(names, indent=1))
     return names
@@ -184,6 +187,7 @@ class Evaluator:
         work_dir.mkdir(parents=True, exist_ok=True)
         gpus = BUDGET.gpus.split(",")
         weights.ensure_stage1()
+        weights.ensure_metric_models()
 
         with self.tracer.span("eval.generate", node=node_id, n_cases=len(cases), full=full):
             gen = self.generate(
@@ -209,6 +213,14 @@ class Evaluator:
         if pinned is None:
             pinned = pin_metrics(metrics)
             self.tracer.emit("eval.metrics_pinned", metrics=pinned)
+            # A metric that yields nothing for every case is invisible in the score:
+            # its whole dimension silently disappears. Say so loudly at pin time.
+            absent = sorted({m for names in DIMENSIONS.values() for m in names} - set(pinned)
+                            - set(EVAL.vlm_metrics_names()))
+            if absent:
+                self.tracer.emit("eval.metrics_absent", metrics=absent)
+                print(f"WARNING: no case produced these metrics, so they cannot be "
+                      f"optimised: {absent}", flush=True)
         elif missing:
             return EvalResult(ok=False, seconds=time.time() - t0,
                               failure=f"metrics missing vs the pinned set: {missing}")

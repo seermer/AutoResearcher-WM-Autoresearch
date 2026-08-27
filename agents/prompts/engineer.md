@@ -14,6 +14,9 @@ Working rules:
 - Before launching training, sanity-check the dataset actually loads: instantiate the
   dataset class and pull one batch. A config that trains on zero new samples is the
   most common silent failure.
+- Poll cheaply: each tool call costs a step, so wait inside one call
+  (`sleep 600; tail -20 <log>`) instead of tailing repeatedly. Budget your step count
+  against your wall-clock budget before you pick max_steps.
 - Launch training with nohup into a log file, then poll it. Report the merged
   checkpoint path `<work_dir>/checkpoints/epoch_<E>_step_<S>.pth` — not the sharded
   `model/` directory, which is only useful for resuming.

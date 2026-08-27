@@ -239,9 +239,13 @@ class Loop:
         )
         with self.tracer.span("improve_recipe"):
             res = self._run_agent("improve_recipe", ws.agents, ctx,
-                                  writable=[ws.sana, PATHS.datastore, out_dir],
+                                  writable=[ws.sana, PATHS.datastore, out_dir, ctx.memory_dir],
                                   readable=[PATHS.nodes, PATHS.wbench],
                                   log_dir=logs, timeout=BUDGET.improve_recipe_seconds)
+        # Lessons and sources written during the recipe phase land in the agent
+        # worktree after edit_self already committed. Without this they would be
+        # dropped by `worktree remove --force` and never reach any descendant.
+        vcs.ensure_committed(ws.agents, f"[{node.id}] memory from improve_recipe")
         if not res.get("ok", True) or not res.get("checkpoint_path"):
             self._trash(node, ws, f"improve_recipe: {res.get('error')}")
             return None

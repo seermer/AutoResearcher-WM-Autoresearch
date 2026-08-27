@@ -16,6 +16,12 @@ TEXT_REPO = "Efficient-Large-Model/gemma-2-2b-it"
 STAGE1_PATTERNS = ["config.yaml", "dit/*", "vae/*"]
 DIT_FILE = "dit/sana_wm_1600m_720p.safetensors"
 
+# WBench's MegaSAM stage pulls this at run time, once per worker. Eight workers
+# racing a cold cache all fail, MegaSAM writes no poses, and navigation_trajectory
+# plus the spatial metrics silently report zero applicable cases. Warm it serially.
+UNIDEPTH_REPO = "lpiccinelli/unidepth-v2-vitl14"
+UNIDEPTH_REVISION = "1d0d3c52f60b5164629d279bb9a7546458e6dcc4"
+
 
 def bundle_dir() -> Path:
     return PATHS.cache / "weights" / "sana_wm_stage1"
@@ -33,6 +39,15 @@ def ensure_stage1(force: bool = False) -> dict:
         snapshot_download(repo_id=TEXT_REPO, local_dir=str(text))
     return {"root": root, "config": root / "config.yaml",
             "dit": root / DIT_FILE, "text_encoder": text}
+
+
+def ensure_metric_models() -> dict:
+    """Pre-download the metric weights WBench fetches from the Hub."""
+    from huggingface_hub import snapshot_download
+
+    root = snapshot_download(repo_id=UNIDEPTH_REPO, revision=UNIDEPTH_REVISION,
+                             allow_patterns=["config.json", "model.safetensors"])
+    return {"unidepth": Path(root)}
 
 
 def size_gb(path: Path) -> float:

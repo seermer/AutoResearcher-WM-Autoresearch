@@ -200,4 +200,6 @@ Everything is env-overridable; see `kernel/config.py`.
 | `AR_GPUS` | GPU list for generation and training |
 | `AR_PROXY_CASES` | proxy rung size |
 | `AR_MODEL_META` etc. | per-role model, so a strong model can drive the meta agent |
+| `AR_LLM_EXTRA_BODY` | vendor request fields; defaults to DeepSeek reasoning off |
+| `AR_SPEND_LOG` | JSONL of per-role token usage; the API is billed per token |
 | `VLM_API_KEY` | enables WBench's VLM metrics |
