@@ -32,7 +32,7 @@ MIN_CASE_SUCCESS = 0.9
 # node on an 8-case rung. The generated videos are kept -- they are the only visual
 # record of what a node actually produced -- and so are the MegaSAM pose estimates,
 # which are 128 KB and the evidence behind every navigation score.
-SCRATCH_DIRS = ("da3_cache", "masks", "_navi_videos_tmp")
+SCRATCH_DIRS = ("da3_cache", "masks", "_navi_videos_tmp", "case_ids")
 
 
 def drop_scratch(work_dir: Path, node_id: str, keep_videos: bool = True) -> float:
