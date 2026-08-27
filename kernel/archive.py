@@ -24,7 +24,7 @@ class Node:
     self_edit: dict = field(default_factory=dict)     # summary + diffstat of edit_self
     recipe: dict = field(default_factory=dict)        # data recipe manifest
     shards: list = field(default_factory=list)        # immutable data shard ids
-    train: dict = field(default_factory=dict)         # steps, lora config, wall-clock
+    train: dict = field(default_factory=dict)         # steps, config path, wall-clock
     checkpoint_path: str | None = None    # only the newest node keeps one
     checkpoint_evicted: bool = False
     # Evaluation

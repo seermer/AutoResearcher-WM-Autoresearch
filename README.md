@@ -46,7 +46,7 @@ This is re-verified programmatically after every self-edit.
    process, with its agent worktree first on `sys.path`. Verify diff, entry
    points and compilation. Failure → trash branch.
 3. **Evaluate** — run the *edited* agent's `improve_recipe`: change the data,
-   train a LoRA, return the adapter. Then the kernel runs WBench. Failure → trash.
+   train, return the merged checkpoint. Then the kernel runs WBench. Failure → trash.
 4. **Backpropagate** — push the result up through every ancestor.
 5. **Insert** — the child becomes a node; repeat.
 

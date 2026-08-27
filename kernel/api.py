@@ -42,7 +42,7 @@ class ImproveRecipeContext:
     agents_dir: Path          # readable: your own code
     sana_dir: Path            # writable: the WM training codebase for this node
     datastore_dir: Path       # writable, shared, content-addressed: new data lives here
-    out_dir: Path             # writable: where the LoRA adapter and manifest go
+    out_dir: Path             # writable: where the checkpoint manifest and logs go
     history_path: Path
     memory_dir: Path
     logs_dir: Path

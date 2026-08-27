@@ -117,7 +117,7 @@ def gen_cmd(sana_root: Path, videos: Path, ids_path: Path, shard: int, num_shard
 
 
 class Evaluator:
-    """Runs the fixed WBench protocol against a node's LoRA delta."""
+    """Runs the fixed WBench protocol against a node's trained checkpoint."""
 
     def __init__(self, tracer: Tracer | None = None):
         self.tracer = tracer or Tracer()

@@ -54,7 +54,7 @@ def n_plan(state: RecipeState) -> dict:
         f"Weaknesses:\n{state.get('weaknesses','')}\n\n"
         f"Already tried in this archive:\n{state.get('already_tried','none')}\n\n"
         f"The Sana training codebase is at {c.sana_dir}; the baseline config is "
-        f"configs/sana_wm/stage1/sana_wm_stage1_lora_base.yaml. Inspect the data layout "
+        f"configs/sana_wm/stage1/sana_wm_stage1_recipe_base.yaml. Inspect the data layout "
         f"under {c.sana_dir}/data before deciding. Choose one intervention."),
         memory_dir=c.memory_dir)
     return {"plan": roles.field(out, "PLAN", out),
@@ -87,7 +87,7 @@ def n_engineer(state: RecipeState) -> dict:
         f"Paths: sana={c.sana_dir}  datastore={c.datastore_dir}  out={c.out_dir}  "
         f"logs={c.logs_dir}  base_checkpoint={c.base_checkpoint}\n"
         f"GPUs={c.gpus}. Wall-clock budget {c.budget_seconds//3600}h, disk {c.disk_gb:.0f} GB.\n"
-        f"Implement the plan, train, and report the adapter path.{retry}"),
+        f"Implement the plan, train, and report the checkpoint path.{retry}"),
         memory_dir=c.memory_dir, steps=roles.STEP_LIMIT + 20)
     return {"actions": roles.field(out, "ACTIONS", out),
             "config": roles.field(out, "CONFIG"),

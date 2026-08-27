@@ -2,7 +2,10 @@
 agent has added to tools_ext. Editable."""
 from __future__ import annotations
 
+import json
+import os
 import re
+import time
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -56,15 +59,33 @@ def system_prompt(role: str, memory_dir: Path | None = None, extra: str = "") ->
     return "\n\n---\n\n".join(parts)
 
 
+def _account(role: str, messages: list, elapsed: float) -> None:
+    """Token accounting. The API is billed per token, so every role call is logged."""
+    tin = tout = 0
+    for m in messages:
+        u = getattr(m, "usage_metadata", None) or {}
+        tin += u.get("input_tokens", 0)
+        tout += u.get("output_tokens", 0)
+    rec = {"ts": time.time(), "role": role, "input_tokens": tin, "output_tokens": tout,
+           "turns": len(messages), "elapsed_s": round(elapsed, 1)}
+    print(f"[spend] {role}: in={tin} out={tout} turns={len(messages)} {elapsed:.0f}s", flush=True)
+    log = os.environ.get("AR_SPEND_LOG")
+    if log:
+        with open(log, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+
+
 def run(role: str, task: str, memory_dir: Path | None = None, extra: str = "",
         steps: int = STEP_LIMIT, temperature: float = 0.3) -> str:
     """Run one role to completion and return only its final message."""
     agent = create_react_agent(chat(role, temperature=temperature), CORE_TOOLS + extra_tools())
     msgs = [SystemMessage(system_prompt(role, memory_dir, extra)), HumanMessage(task)]
+    t0 = time.time()
     try:
         out = agent.invoke({"messages": msgs}, {"recursion_limit": steps})
     except Exception as e:  # noqa: BLE001
         return f"ERROR: {role} failed: {type(e).__name__}: {e}"
+    _account(role, out["messages"], time.time() - t0)
     text = out["messages"][-1].content
     if isinstance(text, list):
         text = " ".join(p.get("text", "") for p in text if isinstance(p, dict))
