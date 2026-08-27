@@ -17,7 +17,6 @@ ROOT = Path(__file__).resolve().parents[1]
 # Same filesystem as the real archive, so the disk-headroom check sees real numbers.
 ARCHIVE = Path(tempfile.mkdtemp(prefix="ar-selftest-", dir=str(ROOT.parent)))
 os.environ["AR_ARCHIVE_DIR"] = str(ARCHIVE)
-os.environ["AR_ARCHIVE_DIR"] = str(ARCHIVE)
 sys.path.insert(0, str(ROOT))
 
 from kernel import selection, vcs  # noqa: E402
@@ -116,7 +115,8 @@ def main() -> None:
 
     for nid in ("n0003", "n0004", "n0005", "n0006", "n0008"):
         check(f"{nid} branch moved to trash namespace",
-              vcs.branch_exists(ROOT, f"trash/{nid}") and not vcs.branch_exists(ROOT, f"node/{nid}"))
+              vcs.branch_exists(ROOT, vcs.TRASH_BRANCH.format(nid=nid))
+              and not vcs.branch_exists(ROOT, vcs.NODE_BRANCH.format(nid=nid)))
         check(f"{nid} worktree removed", not (ARCHIVE / "worktrees" / nid).exists())
 
     from kernel.config import PATHS
