@@ -50,6 +50,39 @@ This is re-verified programmatically after every self-edit.
 4. **Backpropagate** — push the result up through every ancestor.
 5. **Insert** — the child becomes a node; repeat.
 
+## Fitting 24 GB GPUs
+
+Measured per-process resident memory on A100-80GB
+(`nvidia-smi --query-compute-apps`), 4 ranks unless noted:
+
+| config | peak/rank | s/step |
+|---|---|---|
+| CP=4, 25 latent frames | 32.8 GB | 10 |
+| CP=4, 9 latent frames | 31.8 GB | — |
+| CP=1, 25 latent frames | 27.9 GB | 19 |
+| CP=1, 9 latent frames | 23.5 GB | 7 |
+| CP=1, 13 latent frames, **5 ranks** | **22.4 GB** | 10 |
+
+Two non-obvious things drive this.
+
+**Context parallel is the expensive part, not the sequence.** The fused GDN CP Triton
+kernels allocate ~5 GB/rank *outside* PyTorch's allocator — visible only in the OOM
+message as `28.81 GiB in use, 16.00 GiB allowed, 15.42 GiB allocated by PyTorch`. And
+`triton_block_fusion: true` is mandatory whenever CP is on, so CP's cost cannot be
+separated from CP; the only way to avoid it is `cp_size: 1`.
+
+**`latent_frames` only becomes a lever once CP is off.** Under CP each rank holds 1/N of
+the sequence, so cutting frames 64% saved 1.0 GB. Without CP each rank holds all of it
+and the same cut saves 4.4 GB.
+
+Beware measuring this with `torch.cuda.set_per_process_memory_fraction`: it caps only the
+caching allocator, so a run can sit "within" a 24 GB cap while the process actually holds
+33 GB. `scripts/memcap/` caps *and* reports `max_memory_reserved`, but the number that
+matters is per-process resident memory.
+
+The cost is horizon: 13 latent frames is ~6s at 16 fps against WBench cases of ~16s, so
+these recipes train shorter-horizon camera control than they are scored on.
+
 ## Node isolation
 
 Finishing a node freezes it. A child can read everything its parent had and change
@@ -130,7 +163,9 @@ the single newest node's checkpoint. Everything else is deleted the moment a new
 lands — nothing older is ever needed again, and disk here has no room to spare.
 
 - trainer: `Sana/train_video_scripts/train_sana_wm_stage1.py` (stock, unmodified)
-- config: `Sana/configs/sana_wm/stage1/sana_wm_stage1_recipe_base.yaml`
+- config: `Sana/configs/sana_wm/stage1/sana_wm_stage1_recipe_base.yaml` (8x80GB)
+- small GPUs: `..._recipe_5x24gb.yaml` (22.4 GB/rank) and `..._recipe_4x24gb.yaml`
+  (23.5 GB/rank), measured per-process; see **Fitting 24 GB GPUs** below
 - retention: `kernel/loop.py:Loop._retain` → `archive/current/<node>.pth`
 
 FSDP2 already writes a merged, inference-loadable `.pth` next to the sharded state;

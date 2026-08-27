@@ -53,6 +53,9 @@ def cmd_doctor(args) -> None:
         ("vae cache", (PATHS.sana / "data" / "vae_cache").exists()),
         ("stage-1 trainer", (PATHS.sana / "train_video_scripts" / "train_sana_wm_stage1.py").exists()),
         ("recipe config", (PATHS.sana / "configs" / "sana_wm" / "stage1" / "sana_wm_stage1_recipe_base.yaml").exists()),
+        ("small-GPU recipes", all((PATHS.sana / "configs" / "sana_wm" / "stage1" / f).exists()
+                                  for f in ("sana_wm_stage1_recipe_5x24gb.yaml",
+                                            "sana_wm_stage1_recipe_4x24gb.yaml"))),
         ("LLM endpoint set", bool(__import__("os").environ.get("OPENAI_BASE_URL"))),
         ("stage-1 weights bundle", (weights.bundle_dir() / weights.DIT_FILE).exists()),
         ("caches off $HOME", not str(__import__("os").environ.get("HF_HOME", "")).startswith(str(Path.home()))),

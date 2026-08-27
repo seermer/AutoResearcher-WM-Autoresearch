@@ -10,9 +10,11 @@ SANA-WM's score on the WBench navigation split.
   - trainer: `train_video_scripts/train_sana_wm_stage1.py`
   - baseline config: `configs/sana_wm/stage1/sana_wm_stage1_recipe_base.yaml`
   - launch: `torchrun --nproc_per_node=8 train_video_scripts/train_sana_wm_stage1.py --config_path <cfg>`
-  - a small-GPU variant that fits 4x24GB ships as
-    `configs/sana_wm/stage1/sana_wm_stage1_recipe_lowmem.yaml`; its header explains
-    which knobs buy which memory.
+  - small-GPU variants ship as `sana_wm_stage1_recipe_5x24gb.yaml` (22.4 GB/rank) and
+    `sana_wm_stage1_recipe_4x24gb.yaml` (23.5 GB/rank). Their headers carry the measured
+    memory table. They turn context parallel OFF and shorten `latent_frames`, which
+    trains a shorter horizon than WBench evaluates — take that into account if you are
+    diagnosing long-rollout consistency.
   - training writes a merged, inference-loadable checkpoint at
     `<work_dir>/checkpoints/epoch_<E>_step_<S>.pth`; report that path.
 - Data is LATENT-CACHED. The loader `SanaWMZipLatentDataset` pairs, per shard:
