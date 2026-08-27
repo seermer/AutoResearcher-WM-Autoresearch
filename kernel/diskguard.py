@@ -16,7 +16,8 @@ from pathlib import Path
 from .security import free_disk_gb
 from .trace import Tracer
 
-QUIET_SECONDS = 180        # leave a directory alone until its save has settled
+QUIET_SECONDS = 180        # leave a save alone until it has settled
+KEEP_MERGED = 2            # newest two .pth: the one in flight and the one being reported
 
 
 def sharded_dirs(root: Path) -> list[Path]:
@@ -25,6 +26,17 @@ def sharded_dirs(root: Path) -> list[Path]:
     for d in Path(root).glob("**/checkpoints/epoch_*_step_*"):
         if d.is_dir() and d.with_suffix(".pth").is_file():
             out.append(d)
+    return out
+
+
+def stale_merged(root: Path, keep: int = KEEP_MERGED) -> list[Path]:
+    """Superseded merged checkpoints. `checkpoint_total_limit` does not prune these
+    on the FSDP path, so at ~10 GB each a frequent save schedule fills the disk.
+    Keep the newest few: the engineer may be about to report one of them."""
+    out = []
+    for ck in {p.parent for p in Path(root).glob("**/checkpoints/epoch_*_step_*.pth")}:
+        pths = sorted(ck.glob("epoch_*_step_*.pth"), key=lambda p: p.stat().st_mtime)
+        out.extend(pths[:-keep] if keep > 0 else pths)
     return out
 
 
@@ -37,6 +49,14 @@ def sweep(root: Path, quiet: float = QUIET_SECONDS) -> list[str]:
                 continue
             shutil.rmtree(d, ignore_errors=True)
             freed.append(d.name)
+        except OSError:
+            continue
+    for f in stale_merged(root):
+        try:
+            if now - f.stat().st_mtime < quiet:
+                continue
+            f.unlink()
+            freed.append(f.name)
         except OSError:
             continue
     return freed
