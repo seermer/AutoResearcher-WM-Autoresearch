@@ -23,6 +23,8 @@ from .security import SecurityError, assert_disk_headroom, free_disk_gb
 from .trace import Tracer
 
 HOST = PATHS.repo / "kernel" / "runners" / "agent_host.py"
+MAX_CONSECUTIVE_TRASH = int(os.environ.get("AR_MAX_CONSECUTIVE_TRASH", 12))
+TRASH_BACKOFF_CAP = 900
 
 
 class Loop:
@@ -336,7 +338,7 @@ class Loop:
         self.recover()
         self.bootstrap()
         budget = max_nodes or BUDGET.max_nodes
-        done = crashes = 0
+        done = crashes = consecutive_trash = 0
         while done < budget:
             try:
                 node = self.step()
@@ -356,6 +358,20 @@ class Loop:
                 continue
             crashes = 0
             done += 1
+            # A dead LLM endpoint or a full GPU trashes every node without ever
+            # crashing the loop. Back off so a transient outage heals itself, and
+            # stop only once it is clearly not transient.
+            consecutive_trash = consecutive_trash + 1 if node.status == TRASH else 0
+            if consecutive_trash:
+                if consecutive_trash >= MAX_CONSECUTIVE_TRASH:
+                    self.tracer.emit("loop.halt", reason=f"{consecutive_trash} nodes trashed in a row",
+                                     last_failure=node.failure)
+                    print(f"halting: {consecutive_trash} nodes trashed in a row; last: {node.failure}")
+                    return
+                backoff = min(TRASH_BACKOFF_CAP, 30 * 2 ** (consecutive_trash - 1))
+                self.tracer.emit("loop.backoff", seconds=backoff,
+                                 consecutive=consecutive_trash, failure=node.failure)
+                time.sleep(backoff)
             best = self.archive.best()
             print(f"[{done}/{budget}] {node.id} status={node.status} score={node.score} "
                   f"best={best.id if best else '-'}@{best.score if best else '-'}")
