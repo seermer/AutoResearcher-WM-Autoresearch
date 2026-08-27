@@ -186,7 +186,8 @@ class Loop:
         ctx = EditSelfContext(
             node_id=node.id, parent_node_id=parent.id, agents_dir=ws.agents,
             history_path=history, memory_dir=ws.agents / "agents" / "memory",
-            logs_dir=logs, eval_report_path=parent_report if parent_report.exists() else None,
+            logs_dir=logs, parent_logs_dir=(parent.dir / "logs" if (parent.dir / "logs").is_dir() else None),
+            eval_report_path=parent_report if parent_report.exists() else None,
             parent_score=parent.score, parent_metrics=parent.metrics,
             budget_seconds=BUDGET.edit_self_seconds,
         )

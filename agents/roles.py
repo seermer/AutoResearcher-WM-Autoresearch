@@ -46,8 +46,26 @@ def skill_index() -> str:
             "add a new one when a procedure has worked twice.\n" + "\n".join(rows))
 
 
+def environment() -> str:
+    """Which interpreter runs what. Read from the kernel so it cannot drift.
+
+    The shell tool runs in the harness environment, which cannot import Sana; a role
+    that forgets this spends its whole budget rediscovering it.
+    """
+    from kernel.evaluate import SANA_PY
+    sana_bin = Path(SANA_PY).parent
+    return (f"## Environment\n"
+            f"Your shell is NOT the training environment. Sana runs in its own env:\n"
+            f"- python: `{SANA_PY}`\n"
+            f"- launcher: `{sana_bin / 'torchrun'} --nproc_per_node=<N> "
+            f"train_video_scripts/train_sana_wm_stage1.py --config_path <cfg>`, run from the Sana worktree\n"
+            f"Cache variables (HF_HOME, TORCH_HOME, TMPDIR) are already exported; keep them.\n"
+            f"You never run WBench yourself — the kernel evaluates your checkpoint.")
+
+
 def system_prompt(role: str, memory_dir: Path | None = None, extra: str = "") -> str:
-    parts = [(PROMPTS / "common.md").read_text(), (PROMPTS / f"{role}.md").read_text()]
+    parts = [(PROMPTS / "common.md").read_text(), (PROMPTS / f"{role}.md").read_text(),
+             environment()]
     if index := skill_index():
         parts.append(index)
     if memory_dir:

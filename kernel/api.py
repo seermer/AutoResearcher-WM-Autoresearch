@@ -18,7 +18,8 @@ class EditSelfContext:
     agents_dir: Path          # writable: this node's checkout of the agent layer
     history_path: Path        # JSONL: lineage, siblings, archive bests, failures
     memory_dir: Path          # inherited cross-loop memory (inside agents_dir)
-    logs_dir: Path            # this node's logs
+    logs_dir: Path            # this node's logs (empty at edit_self time)
+    parent_logs_dir: Path | None    # where the previous iteration's agent transcripts are
     eval_report_path: Path | None   # the parent's WBench report.json, if any
     parent_score: float | None
     parent_metrics: dict = field(default_factory=dict)

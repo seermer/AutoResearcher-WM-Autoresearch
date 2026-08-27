@@ -156,10 +156,13 @@ def n_review(state: EditState) -> dict:
     c = state["ctx"]
     out = roles.run("analyst", (
         f"Node {c.node_id} is about to rewrite its own agent code. Its parent scored "
-        f"{c.parent_score}. Read the archive history at {c.history_path} and this node's "
-        f"logs at {c.logs_dir}. Do not diagnose the world model here — diagnose the AGENTS: "
-        f"where did the agent process itself waste effort, repeat a mistake, or fail to "
-        f"execute its own plan?"), memory_dir=c.memory_dir)
+        f"{c.parent_score}. Read the archive history at {c.history_path}"
+        + (f" and the previous iteration's agent transcripts at {c.parent_logs_dir}"
+           if c.parent_logs_dir else " (this is the first iteration, so there are no"
+           " earlier transcripts — say so briefly rather than hunting for them)")
+        + ". Do not diagnose the world model here — diagnose the AGENTS: "
+        "where did the agent process itself waste effort, repeat a mistake, or fail to "
+        "execute its own plan?"), memory_dir=c.memory_dir)
     return {"review": out}
 
 
