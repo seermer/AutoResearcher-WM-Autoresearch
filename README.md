@@ -62,6 +62,7 @@ Measured per-process resident memory on A100-80GB
 | CP=1, 25 latent frames | 27.9 GB | 19 |
 | CP=1, 9 latent frames | 23.5 GB | 7 |
 | CP=1, 13 latent frames, **5 ranks** | **22.4 GB** | 10 |
+| CP=1, 9 latent frames, 5 ranks | 21.3 GB | 7 |
 
 Two non-obvious things drive this.
 
