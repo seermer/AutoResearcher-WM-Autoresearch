@@ -156,11 +156,21 @@ class Archive:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w") as f:
             for rel, n in records:
+                # Code is inherited down the lineage only. A sibling's self_edit --
+                # trashed or not -- describes a change the reader does NOT have, and a
+                # reader that assumes otherwise stops re-applying fixes that were lost
+                # with a failed branch, then spends its node chasing the next symptom.
+                inherited = rel == "lineage"
+                self_edit = n.self_edit
+                if self_edit and not inherited:
+                    self_edit = {**self_edit,
+                                 "NOT_IN_YOUR_CODE": "another branch made this change; "
+                                                     "your checkout does not have it"}
                 f.write(json.dumps({
                     "relation": rel, "id": n.id, "parent": n.parent, "depth": n.depth,
                     "status": n.status, "score": n.score, "cmp": round(n.cmp, 4),
-                    "clade_n": n.clade_n, "failure": n.failure,
-                    "self_edit": n.self_edit, "recipe": n.recipe, "train": n.train,
+                    "clade_n": n.clade_n, "failure": n.failure, "inherited": inherited,
+                    "self_edit": self_edit, "recipe": n.recipe, "train": n.train,
                     "metrics": n.metrics,
                 }, default=str) + "\n")
         return path

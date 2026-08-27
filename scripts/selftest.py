@@ -201,6 +201,22 @@ def main() -> None:
     recovered = loop.recover()
     check("abandoned node recovered", "n9999" in recovered and a["n9999"].status == TRASH)
 
+    # A node reads its history to decide what to fix. If a failed branch's self_edit
+    # looks inherited, the lineage stops re-applying fixes that died with that branch.
+    import json as _json
+    hist = a.history_jsonl("n0011", ARCHIVE / "history_check.jsonl")
+    recs = [_json.loads(l) for l in hist.read_text().splitlines() if l.strip()]
+    lin = [r for r in recs if r["relation"] == "lineage"]
+    oth = [r for r in recs if r["relation"] != "lineage"]
+    check("history marks the lineage as inherited", bool(lin) and all(r["inherited"] for r in lin))
+    check("history marks every other branch as not inherited",
+          bool(oth) and not any(r["inherited"] for r in oth))
+    check("a non-inherited self_edit says so in the field agents read",
+          all("NOT_IN_YOUR_CODE" in r["self_edit"] for r in oth if r.get("self_edit")))
+    check("an inherited self_edit is left unannotated",
+          not any("NOT_IN_YOUR_CODE" in r["self_edit"] for r in lin if r.get("self_edit")))
+    hist.unlink(missing_ok=True)
+
     print("\n  tree:")
     for n in sorted(a.nodes, key=lambda x: x.id):
         print(f"    {n.id} {n.status:5s} score={n.score} cmp={n.cmp:.3f} "
