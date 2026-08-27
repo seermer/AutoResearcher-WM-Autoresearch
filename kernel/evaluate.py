@@ -28,13 +28,15 @@ DIMENSIONS = {
     "physical": ["visual_plausibility", "causal_fidelity"],
 }
 MIN_CASE_SUCCESS = 0.9
-# Metric intermediates, worthless once report.json exists. On an 8-case rung they are
-# ~190 MB per node (32 cases: ~750 MB), kept forever for nodes nobody will revisit.
-SCRATCH_DIRS = ("da3_cache", "masks", "megasam", "_navi_videos_tmp")
+# Recomputable metric intermediates, worthless once report.json exists: ~190 MB per
+# node on an 8-case rung. The generated videos are kept -- they are the only visual
+# record of what a node actually produced -- and so are the MegaSAM pose estimates,
+# which are 128 KB and the evidence behind every navigation score.
+SCRATCH_DIRS = ("da3_cache", "masks", "_navi_videos_tmp")
 
 
-def drop_scratch(work_dir: Path, node_id: str, keep_videos: bool = False) -> float:
-    """Delete metric intermediates once the report is written. Returns GB freed."""
+def drop_scratch(work_dir: Path, node_id: str, keep_videos: bool = True) -> float:
+    """Delete recomputable metric intermediates. Returns GB freed."""
     import shutil
     root = Path(work_dir) / node_id
     targets = list(SCRATCH_DIRS) + ([] if keep_videos else ["videos"])
