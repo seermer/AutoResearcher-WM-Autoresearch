@@ -90,9 +90,11 @@ def cmd_eval(args) -> None:
     node = a[args.node]
     ws = NodeWorkspace(node.id, node.parent)
     sana = ws.sana if ws.sana.exists() else PATHS.sana
+    # Re-evaluating by hand must regenerate: resuming would score the videos the
+    # previous checkpoint left behind and report them as this one's.
     res = Evaluator().run(node.id, sana, node.dir,
                           ckpt=Path(node.checkpoint_path) if node.checkpoint_path else None,
-                          full=args.full)
+                          full=args.full, resume=False)
     print(json.dumps(res.summary(), indent=2))
     if res.ok and args.full:
         node.full_score = res.score

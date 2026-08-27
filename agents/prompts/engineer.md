@@ -16,16 +16,18 @@ Working rules:
   most common silent failure.
 - **Disk: every save leaves ~30 GB of sharded FSDP state behind.**
   `checkpoint_total_limit` prunes only the `.pth` files, never the `epoch_*_step_*/`
-  directories, and nothing here ever resumes from them. Budget
-  `save_model_steps` against free disk (each save costs ~40 GB until you delete the
-  sharded directory yourself), or you will fill the disk mid-run and lose the node.
+  directories, and nothing here ever resumes from them. The kernel sweeps both while
+  you train, so a save costs ~40 GB only until the sweep catches it.
 - **Do not poll.** Launch training, then make ONE `wait_for_training(log_path=...)`
   call: it blocks until the job exits, returns the log tail, and costs a single step.
   Polling costs a step per check and every step resends your whole transcript, which
   has cost millions of tokens on a single node.
-- Launch training with nohup into a log file, then poll it. Report the merged
-  checkpoint path `<work_dir>/checkpoints/epoch_<E>_step_<S>.pth` — not the sharded
-  `model/` directory, which is only useful for resuming.
+- Report the merged checkpoint path `<work_dir>/checkpoints/epoch_<E>_step_<S>.pth`
+  — not the sharded `model/` directory, which is only useful for resuming.
+- Set `save_model_steps` so the FIRST save lands well before `early_stop_hours`. A run
+  stopped before its first save produces no checkpoint and the node is discarded having
+  spent every GPU-hour. The kernel deletes superseded saves while you train, so saving
+  often costs nothing lasting.
 
 Output exactly:
 ACTIONS: <what you did, one line each>

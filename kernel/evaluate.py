@@ -69,6 +69,15 @@ class EvalResult:
                 "metrics": self.metrics, "n_cases": self.n_cases}
 
 
+def _killpg(proc: subprocess.Popen) -> None:
+    """Kill a phase's whole process group; it always has children on the GPUs."""
+    try:
+        os.killpg(os.getpgid(proc.pid), 9)
+        proc.wait(timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def _env_for(conda_python: str, gpus: str) -> dict:
     prefix = str(Path(conda_python).parent.parent)
     return {**CACHE_ENV, "CUDA_VISIBLE_DEVICES": gpus,
@@ -153,31 +162,65 @@ class Evaluator:
                  ckpt: Path | None, gpus: list[str], timeout: int,
                  base_ckpt: str | None = None, config: str | None = None,
                  step: int = 60, duration: float = 4.0, resume: bool = True) -> dict:
+        """Generate every case, one process per case, `len(gpus)` at a time.
+
+        The pipeline cannot generate twice in one process: the second call to
+        SanaWMPipeline.generate hangs with the GPU idle and the main thread spinning.
+        That stayed invisible while the proxy had one case per GPU and made every
+        larger rung impossible, so each case now gets a fresh interpreter. The cost
+        is one model load per case (~60 s), overlapped across GPUs.
+        """
         videos = work_dir / node_id / "videos"
         videos.mkdir(parents=True, exist_ok=True)
         ids_path = work_dir / node_id / "cases.json"
         ids_path.write_text(json.dumps(case_ids(cases)))
+        ids_dir = work_dir / node_id / "case_ids"
+        ids_dir.mkdir(exist_ok=True)
 
-        procs = []
-        for shard, gpu in enumerate(gpus):
-            cmd = gen_cmd(sana_root, videos, ids_path, shard, len(gpus), duration, step,
-                          ckpt, base_ckpt, config, resume)
-            log = (work_dir / node_id / f"generate_gpu{gpu}.log").open("wb")
-            procs.append((subprocess.Popen(cmd, cwd=str(sana_root), stdout=log,
-                                           stderr=subprocess.STDOUT, start_new_session=True,
-                                           env={**os.environ, **_env_for(SANA_PY, gpu)}), log))
-
+        pending = [c for c in case_ids(cases)
+                   if not (resume and (videos / f"case_{c}_combined.mp4").is_file())]
+        cached = len(cases) - len(pending)
+        running: dict[str, tuple] = {}          # gpu -> (proc, log handle, case id)
         deadline = time.time() + timeout
-        for p, log in procs:
-            try:
-                p.wait(timeout=max(1, deadline - time.time()))
-            except subprocess.TimeoutExpired:
-                os.killpg(os.getpgid(p.pid), 9)
-            log.close()
+        failed = []
+
+        def launch(gpu: str, cid: str):
+            one = ids_dir / f"{cid}.json"
+            one.write_text(json.dumps([cid]))
+            cmd = gen_cmd(sana_root, videos, one, 0, 1, duration, step,
+                          ckpt, base_ckpt, config, resume)
+            log = (work_dir / node_id / f"generate_case{cid}.log").open("wb")
+            proc = subprocess.Popen(cmd, cwd=str(sana_root), stdout=log,
+                                    stderr=subprocess.STDOUT, start_new_session=True,
+                                    env={**os.environ, **_env_for(SANA_PY, gpu)})
+            running[gpu] = (proc, log, cid)
+
+        while pending or running:
+            for gpu in list(gpus):
+                if gpu not in running and pending and time.time() < deadline:
+                    launch(gpu, pending.pop(0))
+            if not running:
+                break
+            time.sleep(5)
+            for gpu, (proc, log, cid) in list(running.items()):
+                if proc.poll() is None:
+                    if time.time() < deadline:
+                        continue
+                    try:
+                        os.killpg(os.getpgid(proc.pid), 9)
+                    except OSError:
+                        pass
+                    proc.wait()
+                if proc.returncode != 0:
+                    failed.append(cid)
+                log.close()
+                del running[gpu]
+            if time.time() >= deadline:
+                pending = []
 
         produced = sorted(videos.glob("case_*_combined.mp4"))
-        return {"expected": len(cases), "produced": len(produced),
-                "videos_dir": str(videos)}
+        return {"expected": len(cases), "produced": len(produced), "cached": cached,
+                "failed_cases": failed[:20], "videos_dir": str(videos)}
 
     # ---- metrics ----
     def score(self, node_id: str, work_dir: Path, gpus: str, timeout: int) -> dict:
@@ -191,11 +234,22 @@ class Evaluator:
                    "--gpus", gpus, "--phase", phase]
             with log.open("ab") as fh:
                 fh.write(f"\n===== phase {phase} =====\n".encode())
-                p = subprocess.run(cmd, cwd=str(PATHS.wbench), stdout=fh,
-                                   stderr=subprocess.STDOUT, timeout=timeout,
-                                   env={**os.environ, **_env_for(WBENCH_PY, gpus)})
-            if p.returncode != 0:
-                return {"error": f"WBench phase {phase} exited {p.returncode}", "log": str(log)}
+                # WBench fans out into per-GPU subprocesses and spawned workers. Killing
+                # only the direct child would leave those holding every GPU, and the next
+                # node would then fail for a reason nothing in its own trace explains, so
+                # the phase gets its own process group and the group is what gets killed.
+                proc = subprocess.Popen(cmd, cwd=str(PATHS.wbench), stdout=fh,
+                                        stderr=subprocess.STDOUT, start_new_session=True,
+                                        env={**os.environ, **_env_for(WBENCH_PY, gpus)})
+                try:
+                    rc = proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    _killpg(proc)
+                    return {"error": f"WBench phase {phase} timed out after {timeout}s",
+                            "log": str(log)}
+            if rc != 0:
+                _killpg(proc)          # a crashed launcher can still leave workers behind
+                return {"error": f"WBench phase {phase} exited {rc}", "log": str(log)}
         report_path = work_dir / node_id / "evaluation" / "report.json"
         if not report_path.exists():
             return {"error": "no report.json produced", "log": str(log)}
@@ -203,7 +257,8 @@ class Evaluator:
 
     # ---- public ----
     def run(self, node_id: str, sana_root: Path, out_dir: Path, ckpt: Path | None,
-            full: bool = False, base_ckpt: str | None = None, config: str | None = None) -> EvalResult:
+            full: bool = False, base_ckpt: str | None = None, config: str | None = None,
+            resume: bool = True) -> EvalResult:
         t0 = time.time()
         cases = navi_cases() if full else proxy_cases()
         work_dir = out_dir / ("wbench_full" if full else "wbench_proxy")
@@ -217,7 +272,8 @@ class Evaluator:
                 node_id, sana_root, work_dir, cases, ckpt, gpus,
                 timeout=BUDGET.eval_seconds, base_ckpt=base_ckpt, config=config,
                 step=EVAL.full_step if full else EVAL.proxy_step,
-                duration=EVAL.turn_duration_s if full else EVAL.proxy_turn_duration_s)
+                duration=EVAL.turn_duration_s if full else EVAL.proxy_turn_duration_s,
+                resume=resume)
         self.tracer.emit("eval.generated", **gen)
         if gen["produced"] < MIN_CASE_SUCCESS * gen["expected"]:
             return EvalResult(ok=False, seconds=time.time() - t0,

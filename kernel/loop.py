@@ -18,7 +18,7 @@ from . import selection, vcs
 from .archive import OK, PENDING, TRASH, Archive, Node
 from .config import BUDGET, PATHS
 from .contract import verify
-from .evaluate import Evaluator
+from .evaluate import Evaluator, drop_scratch
 from .security import SecurityError, assert_disk_headroom, free_disk_gb
 from .trace import Tracer
 
@@ -65,6 +65,11 @@ class Loop:
         node.checkpoint_path = None
         self.archive.save(node)
         shutil.rmtree(node.dir / "work", ignore_errors=True)
+        # A node that failed during or after generation still has its depth caches and
+        # mask tmp on disk; nothing will ever read them again. The videos stay: they
+        # are the evidence for why this node failed.
+        for wd in ("wbench_proxy", "wbench_full"):
+            drop_scratch(node.dir / wd, node.id)
         ws.trash()
         self.tracer.emit("node.trashed", node=node.id, reason=reason)
         cmp_mod.backpropagate(self.archive, node)
@@ -287,7 +292,17 @@ class Loop:
         if new_shards:
             node.shards = list(node.shards) + new_shards
             self.tracer.emit("datastore.sealed", shards=new_shards)
-        ckpt = self._retain(node, Path(res["checkpoint_path"]))
+        # The guard prunes superseded .pth while training runs, so an engineer that
+        # reports a path it saw earlier can name one that is already gone. The weights
+        # are the expensive part; look for a newer save before writing the node off.
+        reported = Path(res["checkpoint_path"])
+        if not reported.is_file():
+            fallback = diskguard.newest_merged(ws.sana)
+            if fallback is not None:
+                self.tracer.emit("checkpoint.substituted", reported=str(reported),
+                                 used=str(fallback))
+                reported = fallback
+        ckpt = self._retain(node, reported)
         if ckpt is None:
             self._trash(node, ws, f"checkpoint missing: {res['checkpoint_path']}")
             return None

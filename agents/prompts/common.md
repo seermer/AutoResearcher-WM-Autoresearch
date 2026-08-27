@@ -64,6 +64,8 @@ consistency (8 metrics) and navigation_trajectory. Cases span
 - Read files with the file tools instead of asking for content to be pasted; you are
   given PATHS, not dumps, on purpose.
 - Prefer one decisive, well-argued change per node over many speculative ones.
-- Long jobs: launch with nohup into a log file, then poll the log. Do not block one
-  tool call for hours.
+- Long jobs: launch with nohup into a log file, then make ONE `wait_for_training`
+  call on that log. It blocks until the job exits and costs a single step. Do NOT
+  poll in a loop: every step resends your whole transcript, so watching a training
+  run by hand has cost millions of tokens on a single node.
 - Be concise. Your context is limited and shared with the tool output you request.

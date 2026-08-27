@@ -15,6 +15,7 @@ from ..config import BUDGET, EVAL, PATHS
 PHASES = ("edit_self", "improve_recipe", "evaluate", "root.evaluate")
 FATAL = ("node.trashed", "step.crashed", "loop.halt", "datastore.seal_failed",
          "llm.error", "tool.error")
+LOOP_COMMANDS = ("run", "bootstrap", "eval")
 
 
 def _flat_metrics(summary: dict) -> dict:
@@ -124,18 +125,42 @@ class Aggregator:
         return self.stats
 
 
-def _open_spans(path: Path) -> list[dict]:
-    """Spans started but not ended: what the loop is doing right now."""
-    live: dict[str, dict] = {}
-    for e in _read_jsonl(path)[0] if path and path.is_file() else []:
-        ev, span = e.get("event", ""), e.get("span")
-        if not span:
-            continue
-        if ev.endswith(".start"):
-            live[span] = {"name": ev[:-6], "node": e.get("node"), "ts": e.get("ts")}
-        elif ev.endswith((".end", ".error")):
-            live.pop(span, None)
-    return sorted(live.values(), key=lambda s: s.get("ts") or 0)
+class RunState:
+    """Incremental view of the newest run stream: open spans, last event, last select.
+
+    Reparsing the whole stream on every poll is fine for a short run and ruinous for
+    a long one - the file grows without bound, and the UI polls every few seconds.
+    """
+
+    def __init__(self):
+        self.file = ""
+        self.offset = 0
+        self.live: dict[str, dict] = {}
+        self.last_ts = 0.0
+        self.selected: dict | None = None
+
+    def refresh(self, path: Path | None) -> None:
+        if path is None or not path.is_file():
+            return
+        if path.name != self.file:          # the loop restarted into a new stream
+            self.__init__()
+            self.file = path.name
+        events, self.offset = _read_jsonl(path, self.offset)
+        for e in events:
+            self.last_ts = e.get("ts", self.last_ts)
+            if e.get("event") == "select":
+                self.selected = {"parent": e.get("parent"), "child": e.get("node"),
+                                 "parent_cmp": e.get("parent_cmp"), "ts": e.get("ts")}
+            ev, span = e.get("event", ""), e.get("span")
+            if not span:
+                continue
+            if ev.endswith(".start"):
+                self.live[span] = {"name": ev[:-6], "node": e.get("node"), "ts": e.get("ts")}
+            elif ev.endswith((".end", ".error")):
+                self.live.pop(span, None)
+
+    def open_spans(self) -> list[dict]:
+        return sorted(self.live.values(), key=lambda s: s.get("ts") or 0)
 
 
 def loop_pids() -> list[int]:
@@ -154,7 +179,9 @@ def loop_pids() -> list[int]:
         except OSError:
             continue
         for i, a in enumerate(argv[:-1]):
-            if a.rsplit("/", 1)[-1] == "cli.py" and argv[i + 1] == "run":
+            # bootstrap and a manual eval hold the GPUs for as long as a run does;
+            # reporting them as "not running" would be worse than saying nothing.
+            if a.rsplit("/", 1)[-1] == "cli.py" and argv[i + 1] in LOOP_COMMANDS:
                 out.append(int(d.name))
                 break
             if a == "-m" and argv[i + 1] == "kernel.loop":
@@ -170,8 +197,30 @@ def _budget_for(name: str) -> int:
             "root.evaluate": BUDGET.eval_seconds}.get(name, 0)
 
 
+_RUN = RunState()
+_ARCHIVE: dict = {"sig": None, "value": None}
+
+
+def _archive() -> Archive:
+    """Reload the archive only when a node record actually changed.
+
+    The UI polls every few seconds; rereading and parsing every node.json each time
+    is fine at ten nodes and wasteful at a thousand. Stat is cheap, parsing is not.
+    """
+    sig = []
+    for f in PATHS.nodes.glob("*/node.json"):
+        try:
+            sig.append((f.name, f.parent.name, f.stat().st_mtime_ns))
+        except OSError:
+            continue
+    key = hash(tuple(sorted(sig)))
+    if _ARCHIVE["sig"] != key or _ARCHIVE["value"] is None:
+        _ARCHIVE.update(sig=key, value=Archive())
+    return _ARCHIVE["value"]
+
+
 def summary(agg: Aggregator) -> dict:
-    a = Archive()
+    a = _archive()
     stats = agg.refresh()
     nodes = []
     for n in sorted(a.nodes, key=lambda n: n.id):
@@ -189,25 +238,15 @@ def summary(agg: Aggregator) -> dict:
             "spend": stats.get(n.id, {}),
         })
     newest = latest_run()
-    live = []
-    for s in _open_spans(newest) if newest else []:
-        b = _budget_for(s["name"])
-        live.append({**s, "elapsed": round(time.time() - (s["ts"] or time.time())),
-                     "budget": b})
-    selected = None
-    for e in reversed(_read_jsonl(newest)[0] if newest else []):
-        if e.get("event") == "select":
-            selected = {"parent": e.get("parent"), "child": e.get("node"),
-                        "parent_cmp": e.get("parent_cmp"), "ts": e.get("ts")}
-            break
+    _RUN.refresh(newest)
+    live = [{**s, "elapsed": round(time.time() - (s["ts"] or time.time())),
+             "budget": _budget_for(s["name"])} for s in _RUN.open_spans()]
+    selected = _RUN.selected
     # A node's trace stream is opened before its node.json is written. Nothing that
     # was captured should ever be invisible just because the archive entry is younger.
     known = {n.id for n in a.nodes}
     orphans = sorted(set(stats) - known)
-    last_ts = 0.0
-    if newest:
-        tailed = _read_jsonl(newest)[0]
-        last_ts = tailed[-1].get("ts", 0) if tailed else newest.stat().st_mtime
+    last_ts = _RUN.last_ts or (newest.stat().st_mtime if newest else 0.0)
     best = a.best()
     total = shutil.disk_usage(PATHS.archive)
     return {
