@@ -6,8 +6,20 @@ from pathlib import Path
 
 from .config import PATHS
 
-NODE_BRANCH = "node/{nid}"
-TRASH_BRANCH = "trash/{nid}"
+
+def _prefix() -> str:
+    """Branch namespace, derived from the archive directory.
+
+    A git branch can back only one worktree, so two archives sharing the `node/`
+    namespace collide on their very first node. Namespacing by archive lets a test
+    or a side experiment run against the same repos as a live archive.
+    """
+    name = PATHS.archive.name
+    return "node" if name == "archive" else f"node-{name}"
+
+
+NODE_BRANCH = _prefix() + "/{nid}"
+TRASH_BRANCH = "trash-" + _prefix() + "/{nid}"
 
 
 def git(repo: Path, *args: str, check: bool = True) -> str:
