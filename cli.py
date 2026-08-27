@@ -41,6 +41,23 @@ def cmd_status(args) -> None:
           f"expandable={len(selection.expandable(a))} best={best.id if best else '-'}@{best.score if best else '-'}")
 
 
+def _dead_online_tools() -> list[tuple[str, bool]]:
+    from kernel.tools import web
+    probes = [("web_search", web.web_search, {"query": "huggingface datasets", "max_results": 3}),
+              ("arxiv_search", web.arxiv_search, {"query": "diffusion", "max_results": 3}),
+              ("hf_search", web.hf_search, {"query": "egocentric video camera pose", "limit": 5}),
+              ("hf_info", web.hf_info, {"repo_id": "MuteApo/RealCam-Vid", "kind": "dataset"}),
+              ("fetch_url", web.fetch_url, {"url": "https://export.arxiv.org/abs/2504.08181"})]
+    out = []
+    for name, fn, arg in probes:
+        try:
+            r = fn.invoke(arg)
+        except Exception as e:  # noqa: BLE001 - a probe must not abort the preflight
+            r = f"ERROR: {type(e).__name__}: {e}"
+        out.append((name, r.startswith("ERROR") or r.startswith("(no results")))
+    return out
+
+
 def cmd_doctor(args) -> None:
     ok = True
     checks = [
@@ -64,6 +81,12 @@ def cmd_doctor(args) -> None:
     for name, good in checks:
         print(f"  {'PASS' if good else 'FAIL'}  {name}")
         ok &= bool(good)
+    # A search tool that answers "(no results)" to everything reads to an agent as
+    # "this data does not exist", and it spends the node's whole budget concluding
+    # that. Each one is asked a question with a known answer.
+    for name, dead in _dead_online_tools():
+        print(f"  {'FAIL' if dead else 'PASS'}  online tool: {name}")
+        ok &= not dead
     print(f"\n  proxy cases: {len(proxy_cases())}  full navi: {len(navi_cases())}")
     print(f"  VLM metrics: {'enabled' if EVAL.vlm_enabled else 'SKIPPED (no VLM_API_KEY)'}")
     print(f"  free disk: {free_disk_gb():.1f} GB   gpus: {BUDGET.gpus}")
