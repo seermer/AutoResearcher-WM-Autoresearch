@@ -211,13 +211,26 @@ def main() -> None:
 
 
 def cleanup() -> None:
+    """Leave both repos exactly as they were found.
+
+    The branch names must come from the vcs constants: they are namespaced by archive
+    directory, so hardcoding `node/<id>` here silently leaked a branch per node into
+    the real repos on every run.
+    """
     from kernel.config import PATHS
     for repo in (ROOT, PATHS.sana):
-        for nid in list(SCRIPT) + ["n0000"]:
+        for nid in list(SCRIPT) + ["n0000", "n9999"]:
             vcs.remove_worktree(repo, ARCHIVE / "worktrees" / nid / ("agents" if repo == ROOT else "sana"))
-            for br in (f"node/{nid}", f"trash/{nid}"):
+            vcs.remove_worktree(repo, ARCHIVE / "worktrees" / nid / "agents_frozen")
+            for br in (vcs.NODE_BRANCH.format(nid=nid), vcs.TRASH_BRANCH.format(nid=nid)):
                 vcs.git(repo, "branch", "-D", br, check=False)
         vcs.git(repo, "worktree", "prune", check=False)
+    # Sealed shards are chmod a-w on purpose; rmtree cannot remove them as they stand.
+    for d in ARCHIVE.rglob("*"):
+        try:
+            d.chmod(d.stat().st_mode | 0o200)
+        except OSError:
+            pass
     shutil.rmtree(ARCHIVE, ignore_errors=True)
 
 

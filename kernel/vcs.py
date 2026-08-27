@@ -1,10 +1,17 @@
 """Version control: one git branch + worktree per node, for both repos."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 from .config import PATHS
+
+# Commits made by the agent layer are attributed to the system, not to whoever
+# configured git on this host. Human commits and agent commits must stay tellable
+# apart in the history the agents themselves read back.
+AGENT_NAME = os.environ.get("AR_AGENT_NAME", "AutoResearcher")
+AGENT_EMAIL = os.environ.get("AR_AGENT_EMAIL", "autoresearcher@localhost")
 
 
 def _prefix() -> str:
@@ -39,11 +46,13 @@ def branch_exists(repo: Path, name: str) -> bool:
 
 
 def ensure_committed(repo: Path, message: str) -> str | None:
-    """Commit everything in a worktree. Returns the sha, or None if nothing changed."""
+    """Commit everything in a worktree, as the agent. Returns the sha, or None if
+    nothing changed."""
     git(repo, "add", "-A")
     if not git(repo, "status", "--porcelain"):
         return None
-    git(repo, "commit", "-q", "-m", message, "--no-verify")
+    git(repo, "-c", f"user.name={AGENT_NAME}", "-c", f"user.email={AGENT_EMAIL}",
+        "commit", "-q", "-m", message, "--no-verify")
     return git(repo, "rev-parse", "HEAD")
 
 
