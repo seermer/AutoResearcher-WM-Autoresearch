@@ -52,6 +52,23 @@ def newest_log(root: Path) -> Path | None:
     return max(logs, key=lambda p: p.stat().st_mtime, default=None)
 
 
+def await_log(root: Path, timeout: float, poll: float = 15.0) -> Path | None:
+    """Wait for a launched trainer to open its log.
+
+    The trainer writes `train_log.log` only once it has built its work_dir, which
+    is minutes into startup at this scale. A run launched seconds ago therefore
+    has no log at all, and judging it by one reaps a healthy job for being young.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if (log := newest_log(root)) is not None:
+            return log
+        if not pids_under(root):
+            return None
+        time.sleep(poll)
+    return newest_log(root)
+
+
 def wait_for_exit(root: Path, timeout: float, poll: float = 30.0) -> bool:
     """Block until nothing under `root` is running. True if it drained in time."""
     deadline = time.time() + timeout

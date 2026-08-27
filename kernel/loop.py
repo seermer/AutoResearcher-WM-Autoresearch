@@ -23,6 +23,7 @@ from .security import SecurityError, assert_disk_headroom, free_disk_gb
 from .trace import Tracer
 
 HOST = PATHS.repo / "kernel" / "runners" / "agent_host.py"
+TRAIN_STARTUP_SECONDS = 900   # FSDP init + model load before the trainer opens its log
 MAX_CONSECUTIVE_TRASH = int(os.environ.get("AR_MAX_CONSECUTIVE_TRASH", 12))
 TRASH_BACKOFF_CAP = 900
 
@@ -269,6 +270,12 @@ class Loop:
             # still holding every GPU. Give training that is genuinely still working a
             # bounded extension, then reap whatever is left either way.
             log = procs.newest_log(ws.sana)
+            if log is None and procs.pids_under(ws.sana):
+                # An engineer that spends its last step launching training leaves a
+                # job that is alive but has not opened its log yet. Reaping on that
+                # basis threw away a run seven seconds old.
+                self.tracer.emit("improve_recipe.awaiting_log", seconds=TRAIN_STARTUP_SECONDS)
+                log = procs.await_log(ws.sana, TRAIN_STARTUP_SECONDS)
             if log and procs.progressing(log) and procs.pids_under(ws.sana):
                 self.tracer.emit("improve_recipe.grace",
                                  seconds=BUDGET.train_grace_seconds, log=str(log))
