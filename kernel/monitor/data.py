@@ -140,17 +140,26 @@ def _open_spans(path: Path) -> list[dict]:
 
 def loop_pids() -> list[int]:
     """PIDs of the outer loop itself. A silent trace means one of two very different
-    things — the loop is busy inside a long span, or it is gone."""
+    things — the loop is busy inside a long span, or it is gone.
+
+    Matched on argv tokens, not on the raw command line: any shell whose command text
+    merely mentions `cli.py` and `run` would otherwise be reported as the loop.
+    """
     out = []
     for d in Path("/proc").iterdir():
         if not d.name.isdigit():
             continue
         try:
-            cmd = (d / "cmdline").read_bytes().replace(b"\0", b" ").decode()
+            argv = [a for a in (d / "cmdline").read_bytes().decode().split("\0") if a]
         except OSError:
             continue
-        if ("cli.py" in cmd and " run" in cmd) or "kernel.loop" in cmd:
-            out.append(int(d.name))
+        for i, a in enumerate(argv[:-1]):
+            if a.rsplit("/", 1)[-1] == "cli.py" and argv[i + 1] == "run":
+                out.append(int(d.name))
+                break
+            if a == "-m" and argv[i + 1] == "kernel.loop":
+                out.append(int(d.name))
+                break
     return out
 
 

@@ -99,6 +99,27 @@ def cmd_eval(args) -> None:
         a.save(node)
 
 
+def cmd_stop(args) -> None:
+    """Free the GPUs after an interrupted run.
+
+    Training is launched detached (start_new_session), so Ctrl+C on the loop leaves
+    torchrun holding every GPU. The kernel only reaps inside its own iteration, so an
+    interrupted run needs this.
+    """
+    from kernel import procs
+    from kernel.monitor.data import loop_pids
+
+    if pids := loop_pids():
+        print(f"the outer loop is still running (pid {', '.join(map(str, pids))}); "
+              f"stop it first:  kill {' '.join(map(str, pids))}")
+    killed = []
+    for root in sorted(PATHS.worktrees.glob("*/sana")) + sorted(PATHS.worktrees.glob("*/agents")):
+        killed += procs.reap(root)
+    print(f"reaped {len(killed)} process(es) under node worktrees"
+          + (f": {killed}" if killed else ""))
+    print("the next `run` will trash any half-finished node and prune the worktrees")
+
+
 def cmd_monitor(args) -> None:
     from kernel.monitor.server import serve
     serve(args.host, args.port)
@@ -112,6 +133,7 @@ def main() -> None:
     sub.add_parser("bootstrap").set_defaults(fn=cmd_bootstrap)
     r = sub.add_parser("run"); r.add_argument("--max-nodes", type=int, default=None)
     r.add_argument("--seed", type=int, default=None); r.set_defaults(fn=cmd_run)
+    sub.add_parser("stop").set_defaults(fn=cmd_stop)
     m = sub.add_parser("monitor"); m.add_argument("--port", type=int, default=8787)
     m.add_argument("--host", default="127.0.0.1"); m.set_defaults(fn=cmd_monitor)
     e = sub.add_parser("eval"); e.add_argument("--node", required=True)
