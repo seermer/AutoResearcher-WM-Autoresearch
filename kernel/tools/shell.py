@@ -1,6 +1,8 @@
 """Core shell tool. Every command runs through the security layer."""
 from __future__ import annotations
 
+import time
+
 from langchain_core.tools import tool
 
 from ..config import BUDGET, PATHS
@@ -42,4 +44,38 @@ def run_shell(command: str, cwd: str = "", timeout: int = 1800) -> str:
     return f"exit={res.returncode}\n{tail}"
 
 
-TOOLS = [run_shell]
+@tool
+def wait_for_training(log_path: str, timeout: int = 43200, quiet_seconds: int = 900) -> str:
+    """Block until the training job finishes, then return the tail of its log.
+
+    Use this ONCE after launching training instead of polling. Polling costs one LLM
+    turn per check and each turn resends the whole transcript, so a job watched for an
+    hour can cost millions of tokens; this call costs one. Returns when no process is
+    left in your Sana worktree, or when the log has been silent for `quiet_seconds`
+    (a crashed job), or at `timeout`.
+    """
+    ctx = context.get()
+    from pathlib import Path
+
+    from .. import procs
+    root = ctx.writable[0] if ctx.writable else PATHS.archive
+    log = Path(log_path).expanduser()
+    limit = min(timeout, ctx.shell_timeout)
+    deadline = time.time() + limit
+    started = time.time()
+    while time.time() < deadline:
+        alive = procs.pids_under(root)
+        if not alive:
+            break
+        if log.exists() and not procs.progressing(log, quiet_seconds):
+            tail = log.read_text(errors="replace")[-6000:]
+            return (f"STALLED: no output for {quiet_seconds}s while {len(alive)} process(es) "
+                    f"were still up. Treat as a hang.\n{tail}")
+        time.sleep(30)
+    elapsed = time.time() - started
+    tail = log.read_text(errors="replace")[-6000:] if log.exists() else "(no log)"
+    state = "FINISHED" if not procs.pids_under(root) else f"STILL RUNNING after {limit}s"
+    return f"{state} (waited {elapsed:.0f}s)\n{tail}"
+
+
+TOOLS = [run_shell, wait_for_training]

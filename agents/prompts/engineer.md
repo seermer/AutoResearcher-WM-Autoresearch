@@ -19,9 +19,10 @@ Working rules:
   directories, and nothing here ever resumes from them. Budget
   `save_model_steps` against free disk (each save costs ~40 GB until you delete the
   sharded directory yourself), or you will fill the disk mid-run and lose the node.
-- Poll cheaply: each tool call costs a step, so wait inside one call
-  (`sleep 600; tail -20 <log>`) instead of tailing repeatedly. Budget your step count
-  against your wall-clock budget before you pick max_steps.
+- **Do not poll.** Launch training, then make ONE `wait_for_training(log_path=...)`
+  call: it blocks until the job exits, returns the log tail, and costs a single step.
+  Polling costs a step per check and every step resends your whole transcript, which
+  has cost millions of tokens on a single node.
 - Launch training with nohup into a log file, then poll it. Report the merged
   checkpoint path `<work_dir>/checkpoints/epoch_<E>_step_<S>.pth` — not the sharded
   `model/` directory, which is only useful for resuming.

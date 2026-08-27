@@ -28,6 +28,27 @@ DIMENSIONS = {
     "physical": ["visual_plausibility", "causal_fidelity"],
 }
 MIN_CASE_SUCCESS = 0.9
+# Metric intermediates, worthless once report.json exists. On an 8-case rung they are
+# ~190 MB per node (32 cases: ~750 MB), kept forever for nodes nobody will revisit.
+SCRATCH_DIRS = ("da3_cache", "masks", "megasam", "_navi_videos_tmp")
+
+
+def drop_scratch(work_dir: Path, node_id: str, keep_videos: bool = False) -> float:
+    """Delete metric intermediates once the report is written. Returns GB freed."""
+    import shutil
+    root = Path(work_dir) / node_id
+    targets = list(SCRATCH_DIRS) + ([] if keep_videos else ["videos"])
+    freed = 0.0
+    for name in targets:
+        d = root / name
+        if not d.is_dir():
+            continue
+        try:
+            freed += sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) / 2**30
+            shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            continue
+    return freed
 
 
 @dataclass
@@ -224,6 +245,11 @@ class Evaluator:
         elif missing:
             return EvalResult(ok=False, seconds=time.time() - t0,
                               failure=f"metrics missing vs the pinned set: {missing}")
+        # report.json holds everything the archive scores on; the pixels and depth
+        # caches behind it are never read again.
+        freed = drop_scratch(work_dir, node_id)
+        if freed:
+            self.tracer.emit("eval.scratch_dropped", gb=round(freed, 2))
         return EvalResult(ok=True, score=score, dimensions=dims, metrics=metrics,
                           n_cases=gen["produced"], report_path=res["report_path"],
                           seconds=time.time() - t0)

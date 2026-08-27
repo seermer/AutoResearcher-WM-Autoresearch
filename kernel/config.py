@@ -60,6 +60,10 @@ class Budget:
     improve_recipe_seconds: int = int(os.environ.get("AR_IMPROVE_SECONDS", 12 * 3600))
     eval_seconds: int = int(os.environ.get("AR_EVAL_SECONDS", 6 * 3600))
     # Agents choose their own training steps; the kernel caps only wall-clock and disk.
+    # Running late is not the same as failing. If the deadline passes while training
+    # is still writing to its log, the kernel waits this much longer for it to finish
+    # rather than throwing away the GPU hours already spent.
+    train_grace_seconds: int = int(os.environ.get("AR_TRAIN_GRACE_SECONDS", 4 * 3600))
     node_disk_gb: float = float(os.environ.get("AR_NODE_DISK_GB", 25))
     min_free_disk_gb: float = float(os.environ.get("AR_MIN_FREE_DISK_GB", 40))
     gpus: str = os.environ.get("AR_GPUS", "0,1,2,3,4,5,6,7")

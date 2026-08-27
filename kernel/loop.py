@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from . import cmp as cmp_mod
-from . import datastore, diskguard, weights
+from . import datastore, diskguard, procs, weights
 from . import selection, vcs
 from .archive import OK, PENDING, TRASH, Archive, Node
 from .config import BUDGET, PATHS
@@ -253,6 +253,17 @@ class Loop:
         vcs.ensure_committed(ws.agents, f"[{node.id}] memory from improve_recipe")
         salvaged = None
         if not res.get("ok", True) or not res.get("checkpoint_path"):
+            # The agent is gone, but anything it launched with nohup is detached and
+            # still holding every GPU. Give training that is genuinely still working a
+            # bounded extension, then reap whatever is left either way.
+            log = procs.newest_log(ws.sana)
+            if log and procs.progressing(log) and procs.pids_under(ws.sana):
+                self.tracer.emit("improve_recipe.grace",
+                                 seconds=BUDGET.train_grace_seconds, log=str(log))
+                drained = procs.wait_for_exit(ws.sana, BUDGET.train_grace_seconds)
+                self.tracer.emit("improve_recipe.grace_end", drained=drained)
+            if killed := procs.reap(ws.sana):
+                self.tracer.emit("improve_recipe.reaped", pids=killed)
             # Training may well have finished; only the report was late. Look for the
             # weights before throwing away hours of GPU.
             salvaged = diskguard.newest_merged(ws.sana)
@@ -291,6 +302,7 @@ class Loop:
             return None
 
         node.status, node.score, node.metrics = OK, ev.score, ev.summary()
+        procs.reap(ws.sana)              # nothing the agent launched outlives its node
         node.evaluated_at = time.time()
         self.archive.save(node)
         return node
