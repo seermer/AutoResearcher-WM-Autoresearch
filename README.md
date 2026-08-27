@@ -209,7 +209,33 @@ python cli.py bootstrap              # build and score the baseline root node
 python cli.py run --max-nodes 20     # grow the tree
 python cli.py status                 # the tree, scores, CMP
 python cli.py eval --node n0007 --full   # promote a node to the full 158 cases
+python cli.py monitor                # web monitor on http://127.0.0.1:8787
+python scripts/monitor_selftest.py   # capture + monitor, real agent host, canned LLM
 ```
+
+## Monitor
+
+`python cli.py monitor` (or `python -m kernel.monitor`) serves a read-only page over
+the archive. It is a separate process; start and stop it whenever, including mid-run.
+Over SSH, forward the port: `ssh -L 8787:127.0.0.1:8787 host`.
+
+It shows the execution stream in order — every model call with its full system prompt,
+task and response, and every tool call with its full input and output, collapsed by
+default and expandable in full; the archive tree with scores, CMP, branches, the
+currently selected parent and each node's self-edit patch; a per-metric comparison
+across nodes; token spend by node and role; GPU, disk and stray-process state; and
+the generated videos, playable in place.
+
+Capture lives in `kernel/observe.py`, installed by `kernel/runners/agent_host.py`
+before the agent package is imported. It binds to the LangChain context rather than to
+any object the agent layer constructs, so a meta agent that rewrites `roles.py`, the
+graph or its prompts is still recorded. Message bodies are content-addressed into
+`traces/blobs/`, so a system prompt resent on every ReAct turn is stored once.
+
+Two things it cannot see: a hard `kill -9` of the loop leaves no closing event, which
+shows as `LOOP NOT RUNNING`; and what a model receives after `_trim` drops old turns is
+what gets recorded for that turn — the dropped messages remain visible on the earlier
+rows that first carried them.
 
 ## Configuration
 
@@ -224,4 +250,5 @@ Everything is env-overridable; see `kernel/config.py`.
 | `AR_MODEL_META` etc. | per-role model, so a strong model can drive the meta agent |
 | `AR_LLM_EXTRA_BODY` | vendor request fields; defaults to DeepSeek reasoning off |
 | `AR_SPEND_LOG` | JSONL of per-role token usage; the API is billed per token |
+| `AR_PRICE_IN` / `AR_PRICE_OUT` | USD per million tokens; set to price the monitor's cost panel |
 | `VLM_API_KEY` | enables WBench's VLM metrics |

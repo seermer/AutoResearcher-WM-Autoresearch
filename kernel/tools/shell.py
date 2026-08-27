@@ -28,8 +28,17 @@ def run_shell(command: str, cwd: str = "", timeout: int = 1800) -> str:
     low = command.lower()
     if any(d in low for d in DENY):
         return "ERROR: refused by security policy"
-    if str(PATHS.wbench) in command and any(w in low for w in (" > ", ">>", "rm ", "mv ", "sed -i", "tee ")):
+    writes = any(w in low for w in (" > ", ">>", "rm ", "mv ", "sed -i", "tee ", "truncate", "chmod "))
+    if str(PATHS.wbench) in command and writes:
         return "ERROR: refused: WBench is read-only (evaluation code and data may not be modified)"
+    # The trace stream is the run's only record of what every agent did. Agents have
+    # no reason to write there and the file tools already forbid it; this closes the
+    # one path that does not go through them. Note out_dir lives under nodes/<id>/work,
+    # so only the record files themselves are named here, never the node tree.
+    if writes and (str(PATHS.traces) in command
+                   or any(f in command for f in ("node.json", "trace.jsonl"))):
+        return ("ERROR: refused: the run's trace and node records are read-only. "
+                "Write your own outputs under out_dir instead.")
     work = (ctx.writable[0] if ctx.writable else PATHS.archive) if not cwd else cwd
     from pathlib import Path
     work = Path(work).expanduser().resolve()

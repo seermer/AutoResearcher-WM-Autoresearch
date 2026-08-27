@@ -99,6 +99,11 @@ def cmd_eval(args) -> None:
         a.save(node)
 
 
+def cmd_monitor(args) -> None:
+    from kernel.monitor.server import serve
+    serve(args.host, args.port)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="autoresearcher")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -107,6 +112,8 @@ def main() -> None:
     sub.add_parser("bootstrap").set_defaults(fn=cmd_bootstrap)
     r = sub.add_parser("run"); r.add_argument("--max-nodes", type=int, default=None)
     r.add_argument("--seed", type=int, default=None); r.set_defaults(fn=cmd_run)
+    m = sub.add_parser("monitor"); m.add_argument("--port", type=int, default=8787)
+    m.add_argument("--host", default="127.0.0.1"); m.set_defaults(fn=cmd_monitor)
     e = sub.add_parser("eval"); e.add_argument("--node", required=True)
     e.add_argument("--full", action="store_true"); e.set_defaults(fn=cmd_eval)
     args = p.parse_args()

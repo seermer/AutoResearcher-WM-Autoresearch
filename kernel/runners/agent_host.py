@@ -48,6 +48,11 @@ def main() -> None:
             shell_timeout=payload.get("shell_timeout", 3600),
             log_dir=Path(payload["log_dir"]),
         )
+        # Installed before the agent package is imported: whatever the agent layer
+        # has rewritten itself into, every model and tool call it makes is recorded.
+        from kernel import observe
+        observe.install(ctx.node_id, args.phase)
+
         with tool_ctx.using(sandbox):
             import agents.entrypoints as ep
             result = getattr(ep, args.phase)(ctx)

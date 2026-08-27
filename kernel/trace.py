@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from contextlib import contextmanager
@@ -9,7 +10,9 @@ from pathlib import Path
 
 from .config import PATHS
 
-_RUN_ID = time.strftime("%Y%m%d-%H%M%S")
+# Subprocesses inherit os.environ, so the agent host and the outer loop write into
+# one stream and the monitor can render a single ordered timeline.
+_RUN_ID = os.environ.setdefault("AR_RUN_ID", time.strftime("%Y%m%d-%H%M%S"))
 
 
 def _write(path: Path, rec: dict) -> None:
