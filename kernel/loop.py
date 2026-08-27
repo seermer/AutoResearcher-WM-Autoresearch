@@ -196,7 +196,8 @@ class Loop:
         with self.tracer.span("edit_self"):
             res = self._run_agent("edit_self", ws.agents_frozen, ctx,
                                   writable=[ws.agents / "agents"],
-                                  readable=[PATHS.nodes, PATHS.sana, PATHS.wbench, ws.agents_frozen],
+                                  readable=[PATHS.nodes, PATHS.sana, PATHS.wbench,
+                                            ws.agents_frozen, ws.agents],
                                   log_dir=logs, timeout=BUDGET.edit_self_seconds)
         ws.release_frozen()
         if not res.get("ok", True):
@@ -240,7 +241,7 @@ class Loop:
         with self.tracer.span("improve_recipe"):
             res = self._run_agent("improve_recipe", ws.agents, ctx,
                                   writable=[ws.sana, PATHS.datastore, out_dir, ctx.memory_dir],
-                                  readable=[PATHS.nodes, PATHS.wbench],
+                                  readable=[PATHS.nodes, PATHS.wbench, ws.agents],
                                   log_dir=logs, timeout=BUDGET.improve_recipe_seconds)
         # Lessons and sources written during the recipe phase land in the agent
         # worktree after edit_self already committed. Without this they would be

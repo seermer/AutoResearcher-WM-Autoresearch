@@ -11,6 +11,12 @@ from . import context
 MAX_READ = 200_000
 
 
+def _refusal(e: SecurityError, roots) -> str:
+    """A boundary violation is information for the agent, not a crash. Raising here
+    kills the whole role mid-plan; telling it where it may work lets it adapt."""
+    return f"ERROR: {e}\nYou may work under: {', '.join(str(r) for r in roots)}"
+
+
 def _readable(path: str) -> Path:
     p = Path(path).expanduser().resolve()
     roots = context.get().read_roots()
@@ -22,7 +28,10 @@ def _readable(path: str) -> Path:
 @tool
 def read_file(path: str, offset: int = 0, limit: int = 2000) -> str:
     """Read a text file. `offset`/`limit` are line numbers, for large files."""
-    p = _readable(path)
+    try:
+        p = _readable(path)
+    except SecurityError as e:
+        return _refusal(e, context.get().read_roots())
     if not p.is_file():
         return f"ERROR: not a file: {p}"
     lines = p.read_text(errors="replace").splitlines()
@@ -36,7 +45,10 @@ def read_file(path: str, offset: int = 0, limit: int = 2000) -> str:
 def write_file(path: str, content: str) -> str:
     """Write a text file, creating parent directories. Confined to writable roots."""
     ctx = context.get()
-    p = assert_writable(path, ctx.writable)
+    try:
+        p = assert_writable(path, ctx.writable)
+    except SecurityError as e:
+        return _refusal(e, ctx.writable)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content)
     return f"wrote {len(content)} bytes to {p}"
@@ -46,7 +58,10 @@ def write_file(path: str, content: str) -> str:
 def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
     """Replace an exact substring in a file. `old` must be unique unless replace_all."""
     ctx = context.get()
-    p = assert_writable(path, ctx.writable)
+    try:
+        p = assert_writable(path, ctx.writable)
+    except SecurityError as e:
+        return _refusal(e, ctx.writable)
     text = p.read_text(errors="replace")
     n = text.count(old)
     if n == 0:
@@ -60,7 +75,10 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
 @tool
 def list_dir(path: str, pattern: str = "*", depth: int = 1) -> str:
     """List a directory. `pattern` is a glob; `depth` >1 recurses."""
-    p = _readable(path)
+    try:
+        p = _readable(path)
+    except SecurityError as e:
+        return _refusal(e, context.get().read_roots())
     if not p.is_dir():
         return f"ERROR: not a directory: {p}"
     glob = pattern if depth <= 1 else f"**/{pattern}"
@@ -78,7 +96,10 @@ def list_dir(path: str, pattern: str = "*", depth: int = 1) -> str:
 def search_files(path: str, pattern: str, glob: str = "*.py", max_hits: int = 80) -> str:
     """Grep for a regex across files under `path`."""
     import re
-    p = _readable(path)
+    try:
+        p = _readable(path)
+    except SecurityError as e:
+        return _refusal(e, context.get().read_roots())
     rx = re.compile(pattern)
     hits = []
     for f in sorted(p.rglob(glob)):

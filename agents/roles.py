@@ -92,6 +92,12 @@ def run(role: str, task: str, memory_dir: Path | None = None, extra: str = "",
     return (text or "")[:OUTPUT_CHARS]
 
 
+def failed(text: str) -> str:
+    """A role that crashed returns its error as its text; callers must not treat
+    that as an answer. Returns the error, or "" when the run was healthy."""
+    return text if (text or "").startswith("ERROR:") else ""
+
+
 def field(text: str, name: str, default: str = "") -> str:
     """Pull a `NAME: value` block out of a role's structured output."""
     m = re.search(rf"^{name}:\s*(.*?)(?=^[A-Z][A-Z_]+:|\Z)", text or "", re.M | re.S)

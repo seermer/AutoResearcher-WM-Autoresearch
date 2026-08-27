@@ -93,11 +93,14 @@ def n_engineer(state: RecipeState) -> dict:
             "config": roles.field(out, "CONFIG"),
             "steps": roles.field(out, "STEPS"),
             "checkpoint": roles.field(out, "CHECKPOINT"),
+            "error": roles.failed(out),
             "attempts": attempt}
 
 
 def n_verify(state: RecipeState) -> dict:
     """Pure check, no LLM: did training actually produce a loadable checkpoint?"""
+    if state.get("error"):
+        return {"error": state["error"]}
     raw = (state.get("checkpoint") or "").strip().split()
     path = Path(raw[0]) if raw and raw[0].upper() != "NONE" else None
     if path is None:
@@ -172,6 +175,7 @@ def n_meta(state: EditState) -> dict:
     return {"change": roles.field(out, "CHANGE", out),
             "hypothesis": roles.field(out, "HYPOTHESIS"),
             "files": roles.field(out, "FILES"),
+            "error": roles.failed(out),
             "attempts": state.get("attempts", 0) + 1}
 
 
@@ -179,6 +183,8 @@ def n_selfcheck(state: EditState) -> dict:
     """Local pre-check. The kernel re-verifies authoritatively afterwards."""
     from kernel.contract import check_compiles, check_entrypoints
     c = state["ctx"]
+    if state.get("error"):          # the meta role itself failed; nothing was written
+        return {"error": state["error"]}
     for check in (check_compiles, check_entrypoints):
         res = check(Path(c.agents_dir))
         if not res:
