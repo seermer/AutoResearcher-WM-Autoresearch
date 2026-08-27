@@ -50,6 +50,28 @@ This is re-verified programmatically after every self-edit.
 4. **Backpropagate** — push the result up through every ancestor.
 5. **Insert** — the child becomes a node; repeat.
 
+## Evaluating a node
+
+Measured on 8x A100-80GB with an 8-case proxy (2 s turns, 20 sampling steps):
+generation ~90 s/case with one case per GPU, MegaSAM camera tracking ~130 s/case,
+GPU metrics a few seconds each. An 8-case rung takes ~25 min end to end.
+
+Two metrics need watching because they fail *quietly*:
+
+- **`hpsv3_quality` never runs here.** WBench's vendored RAFT ships a `core/datasets.py`
+  that shadows the `datasets` package, and fixing it would mean editing the benchmark.
+  It is excluded from the pinned set and reported at pin time.
+- **`navigation_trajectory` and the spatial metrics depend on MegaSAM.** MegaSAM loads
+  UniDepthV2 from the Hub once per worker; eight workers against a cold cache all fail,
+  MegaSAM writes no poses, and those metrics report "0 applicable cases" without raising.
+  The whole *interaction* dimension then silently disappears — worth 0.6 points on the
+  baseline. `weights.ensure_metric_models()` warms the cache before generation to
+  prevent this; if navigation scores ever vanish, check for `.npz` files under the
+  node's `megasam/` directory before believing the number.
+
+The pinned metric set is fixed by the root node and covers only metrics that feed a
+dimension, so a node cannot score higher because an inconvenient metric crashed.
+
 ## Fitting 24 GB GPUs
 
 Measured per-process resident memory on A100-80GB
