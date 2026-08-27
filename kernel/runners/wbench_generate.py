@@ -163,7 +163,10 @@ def main() -> None:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    status_path = out_dir.parent / f"generate_shard{args.shard}.json"
+    # Named after the case list, not the shard index: the kernel runs one case per
+    # process with shard 0, so a shard-indexed name would have all of them clobbering
+    # one file and the per-case results would be lost.
+    status_path = out_dir.parent / f"generate_{Path(args.cases).stem}.json"
 
     ids = json.loads(Path(args.cases).read_text())
     mine = [c for i, c in enumerate(ids) if i % args.num_shards == args.shard]
