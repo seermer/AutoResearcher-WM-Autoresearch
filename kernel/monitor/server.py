@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..config import PATHS
-from . import data
+from . import data, webmedia
 from .. import observe
 
 APP = Path(__file__).resolve().parent / "app.html"
@@ -58,6 +58,9 @@ class Handler(BaseHTTPRequestHandler):
         """Serves media with Range support so the browser can seek in a video."""
         if not _allowed(path) or not path.is_file():
             return self._json({"error": "not servable"}, 404)
+        # The source is what gets authorised; the substitute is a cached H.264
+        # copy of it, because the generator's mp4v stream will not play.
+        path = webmedia.playable_copy(path) or path
         ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         size = path.stat().st_size
         rng = self.headers.get("Range", "")
