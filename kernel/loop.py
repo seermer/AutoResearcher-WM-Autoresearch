@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from . import cmp as cmp_mod
-from . import datastore, weights
+from . import datastore, diskguard, weights
 from . import selection, vcs
 from .archive import OK, PENDING, TRASH, Archive, Node
 from .config import BUDGET, PATHS
@@ -239,7 +239,9 @@ class Loop:
             disk_gb=min(BUDGET.node_disk_gb, free_disk_gb() - BUDGET.min_free_disk_gb),
             gpus=BUDGET.gpus,
         )
-        with self.tracer.span("improve_recipe"):
+        # Training saves ~30 GB of sharded state per checkpoint that nothing prunes;
+        # without this a long run fills the disk and loses the node hours in.
+        with self.tracer.span("improve_recipe"), diskguard.DiskGuard(ws.sana, self.tracer):
             res = self._run_agent("improve_recipe", ws.agents, ctx,
                                   writable=[ws.sana, PATHS.datastore, out_dir, ctx.memory_dir],
                                   readable=[PATHS.nodes, PATHS.wbench, ws.agents],
