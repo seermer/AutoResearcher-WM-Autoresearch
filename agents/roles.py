@@ -8,7 +8,8 @@ import re
 import time
 from pathlib import Path
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import (AIMessage, HumanMessage, SystemMessage,
+                                     ToolMessage)
 from langgraph.prebuilt import create_react_agent
 
 from kernel.tools import CORE_TOOLS
@@ -20,6 +21,10 @@ PROMPTS = Path(__file__).resolve().parent / "prompts"
 SKILLS = Path(__file__).resolve().parent / "skills"
 STEP_LIMIT = 40
 OUTPUT_CHARS = 4000
+# A ReAct loop resends its whole transcript every step, so cost grows with the
+# SQUARE of the turn count. Polling a training log for an hour cost 2.5M input
+# tokens over 66 turns before this cap existed. Keep the task and a recent window.
+KEEP_RECENT = 24
 
 
 def extra_tools() -> list:
@@ -77,6 +82,27 @@ def system_prompt(role: str, memory_dir: Path | None = None, extra: str = "") ->
     return "\n\n---\n\n".join(parts)
 
 
+def _trim(state: dict) -> dict:
+    """Keep the system prompt, the original task, and the last KEEP_RECENT messages.
+
+    Never split a tool call from its result: an AIMessage with tool_calls whose
+    ToolMessages were dropped is an API error, not just a lossy history.
+    """
+    msgs = state["messages"]
+    if len(msgs) <= KEEP_RECENT + 2:
+        return {}
+    head = [m for m in msgs[:2]]
+    tail = list(msgs[-KEEP_RECENT:])
+    while tail and isinstance(tail[0], ToolMessage):
+        tail.pop(0)                     # its AIMessage is gone; drop the orphan
+    kept = head + tail
+    if kept and isinstance(kept[-1], AIMessage) and getattr(kept[-1], "tool_calls", None):
+        kept = kept[:-1]                # its results are not in yet
+    # llm_input_messages narrows only what the model sees; the real transcript stays
+    # in state so token accounting and the final answer are unaffected.
+    return {"llm_input_messages": kept}
+
+
 def _account(role: str, messages: list, elapsed: float) -> None:
     """Token accounting. The API is billed per token, so every role call is logged."""
     tin = tout = 0
@@ -96,7 +122,8 @@ def _account(role: str, messages: list, elapsed: float) -> None:
 def run(role: str, task: str, memory_dir: Path | None = None, extra: str = "",
         steps: int = STEP_LIMIT, temperature: float = 0.3) -> str:
     """Run one role to completion and return only its final message."""
-    agent = create_react_agent(chat(role, temperature=temperature), CORE_TOOLS + extra_tools())
+    agent = create_react_agent(chat(role, temperature=temperature), CORE_TOOLS + extra_tools(),
+                               pre_model_hook=_trim)
     msgs = [SystemMessage(system_prompt(role, memory_dir, extra)), HumanMessage(task)]
     t0 = time.time()
     try:
