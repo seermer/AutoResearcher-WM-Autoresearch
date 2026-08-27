@@ -120,11 +120,30 @@ def main() -> None:
     env = {**os.environ, "AR_ARCHIVE_DIR": str(arch), "AR_RUN_ID": "test-run",
            "OPENAI_BASE_URL": f"http://127.0.0.1:{llm_port}", "OPENAI_API_KEY": "fake",
            "PYTHONUNBUFFERED": "1"}
+    # A node runs out of its own checkout, which carries its own copy of `kernel`
+    # next to its own `agents`. Passing REPO as the worktree -- as this test used
+    # to -- makes the two indistinguishable and hides which one wins. This stand-in
+    # makes the shadow copy loud: importing it writes a marker and then fails.
+    wt = tmp / "wt"
+    (wt / "kernel").mkdir(parents=True)
+    (wt / "agents").symlink_to(REPO / "agents")
+    (wt / "kernel" / "__init__.py").write_text(
+        "import pathlib\n"
+        "pathlib.Path(__file__).with_name('SHADOWED').write_text('x')\n"
+        "raise ImportError('the node checkout shadowed the kernel')\n")
+
     print("running the real agent host against a canned endpoint…")
-    subprocess.run([PY, str(REPO / "kernel" / "runners" / "agent_host.py"),
-                    "--worktree", str(REPO), "--kernel_root", str(REPO),
+    proc = subprocess.run([PY, str(REPO / "kernel" / "runners" / "agent_host.py"),
+                    "--worktree", str(wt), "--kernel_root", str(REPO),
                     "--phase", "edit_self", "--ctx", str(ctx), "--out", str(tmp / "out.json")],
-                   cwd=str(REPO), env=env, capture_output=True, timeout=600)
+                   cwd=str(wt), env=env, capture_output=True, timeout=600)
+
+    check("the node checkout cannot shadow the kernel package",
+          not (wt / "kernel" / "SHADOWED").exists(),
+          proc.stderr.decode("utf-8", "replace")[-400:])
+    check("no shadow archive under the node checkout",
+          not (wt / "archive").exists() and not (wt / "cache").exists(),
+          str(sorted(q.name for q in wt.iterdir())))
 
     trace = arch / "nodes" / "n0001" / "trace.jsonl"
     check("agent host produced a node trace", trace.is_file(), str(trace))

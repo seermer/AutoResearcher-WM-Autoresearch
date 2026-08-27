@@ -52,8 +52,13 @@ class Loop:
                "--ctx", str(ctx_file), "--out", str(out_file)]
         with (log_dir / f"{phase}.log").open("ab") as fh:
             try:
+                # Belt and braces for the same shadowing problem agent_host guards
+                # against: pinned explicitly, even a kernel loaded from somewhere
+                # else writes its trace and its downloads where the run expects.
+                env = {**os.environ, "PYTHONUNBUFFERED": "1",
+                       "AR_ARCHIVE_DIR": str(PATHS.archive), "AR_CACHE_DIR": str(PATHS.cache)}
                 subprocess.run(cmd, cwd=str(worktree), stdout=fh, stderr=subprocess.STDOUT,
-                               timeout=timeout, env={**os.environ, "PYTHONUNBUFFERED": "1"})
+                               timeout=timeout, env=env)
             except subprocess.TimeoutExpired:
                 return {"ok": False, "error": f"{phase} exceeded {timeout}s"}
         if not out_file.exists():

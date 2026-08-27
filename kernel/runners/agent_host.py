@@ -23,7 +23,18 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
+    # Both directories contain both packages, and the worktree has to come first
+    # so the node's candidate `agents` is what runs. Binding `kernel` while only
+    # the kernel root is importable pins its __path__ to the main checkout, so
+    # every later `from kernel import ...` -- the agent layer's included --
+    # resolves there. Inserting the two paths and hoping does not work: the
+    # worktree wins, and the node then runs its own kernel, with its own idea of
+    # where the workspace is and what is protected.
     sys.path.insert(0, args.kernel_root)
+    import kernel
+    got = Path(kernel.__file__).resolve().parents[1]
+    if got != Path(args.kernel_root).resolve():
+        raise SystemExit(f"kernel resolved to {got}, not {args.kernel_root}")
     sys.path.insert(0, args.worktree)
 
     out_path = Path(args.out)
