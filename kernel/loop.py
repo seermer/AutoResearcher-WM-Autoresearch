@@ -236,6 +236,7 @@ class Loop:
             memory_dir=ws.agents / "agents" / "memory", logs_dir=logs,
             base_checkpoint=weights.ensure_stage1()["dit"],
             wbench_dir=PATHS.wbench, budget_seconds=BUDGET.improve_recipe_seconds,
+            deadline_ts=time.time() + BUDGET.improve_recipe_seconds,
             disk_gb=min(BUDGET.node_disk_gb, free_disk_gb() - BUDGET.min_free_disk_gb),
             gpus=BUDGET.gpus,
         )
@@ -250,9 +251,17 @@ class Loop:
         # worktree after edit_self already committed. Without this they would be
         # dropped by `worktree remove --force` and never reach any descendant.
         vcs.ensure_committed(ws.agents, f"[{node.id}] memory from improve_recipe")
+        salvaged = None
         if not res.get("ok", True) or not res.get("checkpoint_path"):
-            self._trash(node, ws, f"improve_recipe: {res.get('error')}")
-            return None
+            # Training may well have finished; only the report was late. Look for the
+            # weights before throwing away hours of GPU.
+            salvaged = diskguard.newest_merged(ws.sana)
+            if salvaged is None:
+                self._trash(node, ws, f"improve_recipe: {res.get('error')}")
+                return None
+            self.tracer.emit("improve_recipe.salvaged", path=str(salvaged),
+                             agent_error=str(res.get("error"))[:300])
+            res = {**res, "checkpoint_path": str(salvaged)}
 
         vcs.ensure_committed(ws.sana, f"[{node.id}] recipe: {res.get('summary','')[:120]}")
         try:
@@ -270,6 +279,9 @@ class Loop:
             self._trash(node, ws, f"checkpoint missing: {res['checkpoint_path']}")
             return None
         node.recipe, node.train = res.get("recipe", {}), res.get("train", {})
+        if salvaged is not None:
+            node.train = {**node.train, "salvaged": True,
+                          "agent_error": str(res.get("error"))[:300]}
         self.archive.save(node)
 
         with self.tracer.span("evaluate"):

@@ -74,6 +74,11 @@ def n_scout(state: RecipeState) -> dict:
     return {"sources": out}
 
 
+def _remaining_min(c) -> int:
+    import time
+    return max(0, int((getattr(c, "deadline_ts", 0) - time.time()) // 60))
+
+
 def n_engineer(state: RecipeState) -> dict:
     c = state["ctx"]
     attempt = state.get("attempts", 0) + 1
@@ -86,7 +91,11 @@ def n_engineer(state: RecipeState) -> dict:
         f"SOURCES:\n{state.get('sources','(none needed)')}\n\n"
         f"Paths: sana={c.sana_dir}  datastore={c.datastore_dir}  out={c.out_dir}  "
         f"logs={c.logs_dir}  base_checkpoint={c.base_checkpoint}\n"
-        f"GPUs={c.gpus}. Wall-clock budget {c.budget_seconds//3600}h, disk {c.disk_gb:.0f} GB.\n"
+        f"GPUs={c.gpus}. Disk {c.disk_gb:.0f} GB. "
+        f"HARD DEADLINE in {_remaining_min(c)} minutes (epoch {c.deadline_ts:.0f}); the "
+        f"kernel kills this phase then. Training must FINISH and be reported before it, "
+        f"so set train.early_stop_hours from the time remaining now, not from your "
+        f"nominal budget, and leave at least 15 minutes to verify and report.\n"
         f"Implement the plan, train, and report the checkpoint path.{retry}"),
         memory_dir=c.memory_dir, steps=roles.STEP_LIMIT + 20)
     return {"actions": roles.field(out, "ACTIONS", out),

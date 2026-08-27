@@ -62,6 +62,26 @@ def sweep(root: Path, quiet: float = QUIET_SECONDS) -> list[str]:
     return freed
 
 
+def newest_merged(root: Path, min_gb: float = 2.0) -> Path | None:
+    """The newest merged checkpoint under a node's training tree, if any.
+
+    Training can succeed and the agent still miss its deadline reporting it. The
+    weights are the expensive part, so the kernel looks for them itself rather than
+    discarding hours of GPU because a polling loop was late.
+    """
+    best, best_mtime = None, 0.0
+    for f in Path(root).glob("**/checkpoints/epoch_*_step_*.pth"):
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        if st.st_size < min_gb * 2**30:
+            continue
+        if st.st_mtime > best_mtime:
+            best, best_mtime = f, st.st_mtime
+    return best
+
+
 class DiskGuard:
     """Background sweeper, started for the duration of one training phase."""
 

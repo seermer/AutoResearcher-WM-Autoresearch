@@ -50,6 +50,9 @@ class ImproveRecipeContext:
     base_checkpoint: Path           # the released stage-1 weights; ALWAYS train from these
     wbench_dir: Path                # READ ONLY: benchmark definition, for understanding tasks
     budget_seconds: int = 12 * 3600
+    # Absolute epoch seconds. A duration is not enough: the phase clock starts before
+    # the engineer does, so a margin computed from "now" silently overruns.
+    deadline_ts: float = 0.0
     disk_gb: float = 25.0
     gpus: str = "0,1,2,3,4,5,6,7"
 
