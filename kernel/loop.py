@@ -121,7 +121,14 @@ class Loop:
         stale = [n for n in self.archive.nodes if n.status == PENDING]
         for node in stale:
             ws = vcs.NodeWorkspace(node.id, node.parent)
+            # _trash reports through the loop's tracer, and recover runs before the
+            # first step binds one to a node. Left alone, a node abandoned by a
+            # previous run ends mid-phase in its own trace with nothing saying why.
+            self.tracer = Tracer(node.id)
+            self.evaluator.tracer = self.tracer
             self._trash(node, ws, "abandoned by a previous run")
+        self.tracer = Tracer()
+        self.evaluator.tracer = self.tracer
         for repo in (PATHS.repo, PATHS.sana):
             vcs.git(repo, "worktree", "prune", check=False)
         # Worktree directories with no live node behind them.

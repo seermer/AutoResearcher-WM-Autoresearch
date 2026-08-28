@@ -200,6 +200,9 @@ def main() -> None:
     a.add(Node(id="n9999", parent="n0000", depth=1, status=PENDING))
     recovered = loop.recover()
     check("abandoned node recovered", "n9999" in recovered and a["n9999"].status == TRASH)
+    tr = (ARCHIVE / "nodes" / "n9999" / "trace.jsonl")
+    check("an abandoned node's own trace says why it ended",
+          tr.is_file() and "node.trashed" in tr.read_text())
 
     # A node reads its history to decide what to fix. If a failed branch's self_edit
     # looks inherited, the lineage stops re-applying fixes that died with that branch.
