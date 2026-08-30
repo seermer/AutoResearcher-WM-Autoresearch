@@ -186,6 +186,17 @@ git -C "$WS/Sana"           checkout live-run
 
 WBench has a single commit on `main` and no branches; leave it as cloned.
 
+**Do both, and do them before `bootstrap`.** Nothing in the system pins a branch name;
+`bootstrap` cuts the root node from whatever commit each repo has checked out at that
+moment, taken independently for AutoResearcher and for Sana — it only ever *reads*
+`live-run`/`main`, and every node it creates lives on its own new `node/<id>` branch, so
+`live-run` and `main` themselves are never at risk. What *is* at risk is the archive:
+checking out `live-run` in one repo and leaving the other on `main` bakes that mismatched
+pair into the root, silently, and every later node inherits from it. Fixing it means
+wiping `archive/` and the `node/*` branches per [Starting over](#starting-over) and
+re-bootstrapping correctly — cheap if you catch it right away, costly in lost
+GPU-hours and API spend the longer the tree has grown on top of it.
+
 Confirm all three:
 
 ```bash
