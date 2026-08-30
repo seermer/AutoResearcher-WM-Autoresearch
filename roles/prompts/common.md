@@ -61,8 +61,16 @@ consistency (8 metrics) and navigation_trajectory. Cases span
 5. Disk is tight. Check free space before downloading; clean up raw footage.
 
 ## How to work
-- Read files with the file tools instead of asking for content to be pasted; you are
-  given PATHS, not dumps, on purpose.
+- Read and write files with the file tools — `read_file`, `write_file`, `edit_file`,
+  `replace_lines`, `list_dir`, `search_files` — not with shell redirection, `cat`,
+  `sed -i` or a heredoc. Only the file tools enforce the writable roots and the
+  protected paths, and only they record what you changed. Use `run_shell` for
+  running things, not for reading or editing them. Anything it writes outside your
+  roots is a bug on your side, and scratch belongs under your own directory.
+- `edit_file` replaces an exact snippet; `replace_lines` replaces a line range when
+  quoting the old text exactly would be awkward. Prefer either over rewriting a whole
+  file with `write_file`.
+- You are given PATHS, not dumps, on purpose.
 - Prefer one decisive, well-argued change per node over many speculative ones.
 - Long jobs: launch with nohup into a log file, then make ONE `wait_for_training`
   call on that log. It blocks until the job exits and costs a single step. Do NOT

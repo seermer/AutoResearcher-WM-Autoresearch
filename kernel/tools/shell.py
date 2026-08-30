@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from langchain_core.tools import tool
 
@@ -40,13 +41,26 @@ def run_shell(command: str, cwd: str = "", timeout: int = 1800) -> str:
         return ("ERROR: refused: the run's trace and node records are read-only. "
                 "Write your own outputs under out_dir instead.")
     work = (ctx.writable[0] if ctx.writable else PATHS.archive) if not cwd else cwd
-    from pathlib import Path
     work = Path(work).expanduser().resolve()
     if is_protected(work):
         return f"ERROR: refused: protected cwd {work}"
     log = (ctx.log_dir / "shell.log") if ctx.log_dir else None
+    # Scratch belongs inside the node. The shell is the one tool that does not go
+    # through the writable-root check, and in the first live run a node wrote and ran
+    # /tmp/verify_ds.py -- outside every root, and still on the disk afterwards.
+    # Pointing TMPDIR at the node's own space makes the default landing spot correct
+    # without pretending the shell is contained.
+    env = {}
+    if ctx.writable:
+        scratch = Path(ctx.writable[0]) / ".tmp"
+        try:
+            scratch.mkdir(parents=True, exist_ok=True)
+            env = {"TMPDIR": str(scratch), "TMP": str(scratch), "TEMP": str(scratch)}
+        except OSError:
+            env = {}
     try:
-        res = run(command, cwd=work, timeout=min(timeout, ctx.shell_timeout), log_path=log)
+        res = run(command, cwd=work, timeout=min(timeout, ctx.shell_timeout),
+                  env=env, log_path=log)
     except Exception as e:
         return f"ERROR: {type(e).__name__}: {e}"
     tail = (res.stdout or "")[-12000:]

@@ -73,6 +73,31 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> str:
 
 
 @tool
+def replace_lines(path: str, start: int, end: int, new: str) -> str:
+    """Replace lines `start`..`end` (1-based, inclusive) with `new`.
+
+    For edits where quoting the old text exactly is awkward -- long blocks, tricky
+    whitespace, repeated snippets. Read the file first: the line numbers must come
+    from the version on disk right now, and `read_file` prints them.
+    """
+    ctx = context.get()
+    try:
+        p = assert_writable(path, ctx.writable)
+    except SecurityError as e:
+        return _refusal(e, ctx.writable)
+    lines = p.read_text(errors="replace").splitlines(keepends=True)
+    if start < 1 or end < start:
+        return f"ERROR: bad range {start}..{end}"
+    if start > len(lines):
+        return f"ERROR: start {start} is past the end of the file ({len(lines)} lines)"
+    end = min(end, len(lines))
+    body = new if new.endswith("\n") or not new else new + "\n"
+    lines[start - 1:end] = [body] if new else []
+    p.write_text("".join(lines))
+    return f"replaced lines {start}-{end} of {p} ({len(lines)} lines now)"
+
+
+@tool
 def list_dir(path: str, pattern: str = "*", depth: int = 1) -> str:
     """List a directory. `pattern` is a glob; `depth` >1 recurses."""
     try:
@@ -116,4 +141,4 @@ def search_files(path: str, pattern: str, glob: str = "*.py", max_hits: int = 80
     return "\n".join(hits) or "(no matches)"
 
 
-TOOLS = [read_file, write_file, edit_file, list_dir, search_files]
+TOOLS = [read_file, write_file, edit_file, replace_lines, list_dir, search_files]

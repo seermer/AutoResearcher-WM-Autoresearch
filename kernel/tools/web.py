@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Literal
 
 import httpx
 from langchain_core.tools import tool
@@ -68,7 +69,7 @@ def arxiv_search(query: str, max_results: int = 8) -> str:
 
 
 @tool
-def hf_search(query: str, kind: str = "dataset", limit: int = 15) -> str:
+def hf_search(query: str, kind: Literal["dataset", "model"] = "dataset", limit: int = 15) -> str:
     """Search HuggingFace for datasets or models. `kind` is 'dataset' or 'model'.
 
     The Hub matches `search` against repo ids, not meaning, so a description of
@@ -119,8 +120,12 @@ def _hf_rows(items: list[dict]) -> str:
 
 
 @tool
-def hf_info(repo_id: str, kind: str = "dataset") -> str:
-    """Fetch the metadata and file listing of a HuggingFace dataset or model repo."""
+def hf_info(repo_id: str, kind: Literal["dataset", "model"]) -> str:
+    """Fetch the metadata and file listing of a HuggingFace repo.
+
+    `kind` has no default on purpose: asking the datasets endpoint about a model repo
+    answers 401, which reads as "you are not allowed" rather than "wrong endpoint".
+    """
     path = "datasets" if kind.startswith("data") else "models"
     try:
         r = httpx.get(f"https://huggingface.co/api/{path}/{repo_id}", timeout=TIMEOUT, follow_redirects=True,
