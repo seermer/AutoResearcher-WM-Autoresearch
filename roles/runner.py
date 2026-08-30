@@ -8,23 +8,28 @@ import re
 import time
 from pathlib import Path
 
-from langchain_core.messages import (AIMessage, HumanMessage, SystemMessage,
-                                     ToolMessage)
-from langgraph.prebuilt import create_react_agent
+from agents import Agent, FunctionTool, RunConfig, Runner
+from agents.exceptions import MaxTurnsExceeded
 
 from kernel.tools import CORE_TOOLS
 
 from . import memory
-from .llm import chat
+from .llm import model_for, settings_for
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
 SKILLS = Path(__file__).resolve().parent / "skills"
 STEP_LIMIT = 40
 OUTPUT_CHARS = 4000
-# A ReAct loop resends its whole transcript every step, so cost grows with the
-# SQUARE of the turn count. Polling a training log for an hour cost 2.5M input
-# tokens over 66 turns before this cap existed. Keep the task and a recent window.
-KEEP_RECENT = 24
+# A tool loop resends its whole transcript every step, so cost grows with the SQUARE
+# of the turn count. Polling a training log for an hour cost 2.5M input tokens over
+# 66 turns before this was bounded. The old cap dropped whole messages, which meant a
+# role could not see that it had already read a file and read it again -- one engineer
+# made 48 reads over 29 distinct files. Trimming the OUTPUT while keeping the call
+# itself visible fixes that: the role still sees `read_file(x)` and a preview of what
+# came back.
+KEEP_RECENT = 4          # turns kept at full fidelity
+TOOL_OUTPUT_CHARS = 2000  # older tool results are cut to this
+TOOL_PREVIEW_CHARS = 400
 
 
 def extra_tools() -> list:
@@ -82,37 +87,45 @@ def system_prompt(role: str, memory_dir: Path | None = None, extra: str = "") ->
     return "\n\n---\n\n".join(parts)
 
 
-def _trim(state: dict) -> dict:
-    """Keep the system prompt, the original task, and the last KEEP_RECENT messages.
+def _as_sdk_tool(lc_tool) -> FunctionTool:
+    """Expose a kernel tool to the SDK without rewriting it.
 
-    Never split a tool call from its result: an AIMessage with tool_calls whose
-    ToolMessages were dropped is an API error, not just a lossy history.
+    The kernel's tools are LangChain StructuredTools and stay that way: they carry
+    the sandbox checks, they are covered by the selftests, and agents may not edit
+    them. Only the calling convention is adapted.
     """
-    msgs = state["messages"]
-    if len(msgs) <= KEEP_RECENT + 2:
-        return {}
-    head = [m for m in msgs[:2]]
-    tail = list(msgs[-KEEP_RECENT:])
-    while tail and isinstance(tail[0], ToolMessage):
-        tail.pop(0)                     # its AIMessage is gone; drop the orphan
-    kept = head + tail
-    if kept and isinstance(kept[-1], AIMessage) and getattr(kept[-1], "tool_calls", None):
-        kept = kept[:-1]                # its results are not in yet
-    # llm_input_messages narrows only what the model sees; the real transcript stays
-    # in state so token accounting and the final answer are unaffected.
-    return {"llm_input_messages": kept}
+    schema = lc_tool.args_schema.model_json_schema()
+    schema.setdefault("type", "object")
+    schema.pop("title", None)
+
+    async def _invoke(_ctx, args_json: str) -> str:
+        try:
+            kwargs = json.loads(args_json) if args_json else {}
+        except json.JSONDecodeError as e:
+            return f"ERROR: could not parse arguments: {e}"
+        try:
+            return str(lc_tool.invoke(kwargs))
+        except Exception as e:  # noqa: BLE001 - a tool must report, never abort the run
+            return f"ERROR: {lc_tool.name} raised {type(e).__name__}: {e}"
+
+    return FunctionTool(name=lc_tool.name,
+                        description=(lc_tool.description or "").strip(),
+                        params_json_schema=schema,
+                        on_invoke_tool=_invoke,
+                        strict_json_schema=False)
 
 
-def _account(role: str, messages: list, elapsed: float) -> None:
+def _tools() -> list[FunctionTool]:
+    return [_as_sdk_tool(t) for t in (CORE_TOOLS + extra_tools())]
+
+
+def _account(role: str, usage, turns: int, elapsed: float) -> None:
     """Token accounting. The API is billed per token, so every role call is logged."""
-    tin = tout = 0
-    for m in messages:
-        u = getattr(m, "usage_metadata", None) or {}
-        tin += u.get("input_tokens", 0)
-        tout += u.get("output_tokens", 0)
+    tin = getattr(usage, "input_tokens", 0) or 0
+    tout = getattr(usage, "output_tokens", 0) or 0
     rec = {"ts": time.time(), "role": role, "input_tokens": tin, "output_tokens": tout,
-           "turns": len(messages), "elapsed_s": round(elapsed, 1)}
-    print(f"[spend] {role}: in={tin} out={tout} turns={len(messages)} {elapsed:.0f}s", flush=True)
+           "turns": turns, "elapsed_s": round(elapsed, 1)}
+    print(f"[spend] {role}: in={tin} out={tout} turns={turns} {elapsed:.0f}s", flush=True)
     log = os.environ.get("AR_SPEND_LOG")
     if log:
         with open(log, "a") as f:
@@ -122,18 +135,30 @@ def _account(role: str, messages: list, elapsed: float) -> None:
 def run(role: str, task: str, memory_dir: Path | None = None, extra: str = "",
         steps: int = STEP_LIMIT, temperature: float = 0.3) -> str:
     """Run one role to completion and return only its final message."""
-    agent = create_react_agent(chat(role, temperature=temperature), CORE_TOOLS + extra_tools(),
-                               pre_model_hook=_trim)
-    msgs = [SystemMessage(system_prompt(role, memory_dir, extra)), HumanMessage(task)]
+    from agents.extensions import ToolOutputTrimmer
+
+    agent = Agent(name=role,
+                  instructions=system_prompt(role, memory_dir, extra),
+                  model=model_for(role),
+                  model_settings=settings_for(role, temperature),
+                  tools=_tools())
+    cfg = RunConfig(call_model_input_filter=ToolOutputTrimmer(
+        recent_turns=KEEP_RECENT, max_output_chars=TOOL_OUTPUT_CHARS,
+        preview_chars=TOOL_PREVIEW_CHARS))
     t0 = time.time()
     try:
-        out = agent.invoke({"messages": msgs}, {"recursion_limit": steps})
+        out = Runner.run_sync(agent, task, max_turns=steps, run_config=cfg)
+    except MaxTurnsExceeded as e:
+        # Loud on purpose. The previous harness returned the runner's own
+        # "Sorry, need more steps to process this request." as if it were the role's
+        # answer, and a node wrote that string into its recipe as the plan.
+        return f"ERROR: {role} failed: MaxTurnsExceeded: {e}"
     except Exception as e:  # noqa: BLE001
         return f"ERROR: {role} failed: {type(e).__name__}: {e}"
-    _account(role, out["messages"], time.time() - t0)
-    text = out["messages"][-1].content
-    if isinstance(text, list):
-        text = " ".join(p.get("text", "") for p in text if isinstance(p, dict))
+    _account(role, out.context_wrapper.usage, len(out.new_items), time.time() - t0)
+    text = out.final_output
+    if not isinstance(text, str):
+        text = str(text)
     return (text or "")[:OUTPUT_CHARS]
 
 

@@ -188,4 +188,107 @@ def install(node_id: str | None, phase: str = "") -> Observer:
         register_configure_hook(_VAR, True)
     obs = Observer(node_id, phase)
     _VAR.set(obs)
+    install_sdk(node_id, phase)
+    return obs
+
+
+def _span_elapsed(span) -> float | None:
+    try:
+        from datetime import datetime
+        a, b = span.started_at, span.ended_at
+        if not (a and b):
+            return None
+        return round((datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds(), 3)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+class SdkObserver:
+    """Mirrors the Observer onto the Agents SDK's own tracing.
+
+    Registered from the kernel, before the agent package is imported, for the same
+    reason the callback is: whatever the agent layer has rewritten itself into, its
+    model and tool calls are still recorded. Installing it also REPLACES the SDK's
+    default processor, which uploads every trace to OpenAI -- with a DeepSeek key
+    that merely fails with a 401, but it is our prompts and paths on the wire.
+    """
+
+    def __init__(self, node_id: str | None, phase: str = ""):
+        self.tracer = Tracer(node_id)
+        self.phase = phase
+
+    def _emit(self, event: str, **fields) -> None:
+        try:
+            self.tracer.emit(event, phase=self.phase, **fields)
+        except Exception:  # noqa: BLE001 - observation must never break the run
+            pass
+
+    def on_trace_start(self, trace) -> None:
+        self._emit("sdk.trace.start", trace_id=getattr(trace, "trace_id", None),
+                   name=getattr(trace, "name", None))
+
+    def on_trace_end(self, trace) -> None:
+        self._emit("sdk.trace.end", trace_id=getattr(trace, "trace_id", None))
+
+    def on_span_start(self, span) -> None:
+        pass
+
+    def on_span_end(self, span) -> None:
+        """Emit the same llm.* records the callback layer produces.
+
+        Both are written at span end, so a call appears once it has returned rather
+        than while it is in flight; the elapsed time comes from the span itself. Tool
+        calls are not mirrored here -- the kernel's tools are still LangChain tools
+        and the callback already records them, so doing both would double every one.
+        """
+        d = getattr(span, "span_data", None)
+        if type(d).__name__ != "GenerationSpanData":
+            return
+        try:
+            sid = str(getattr(span, "span_id", "") or "")
+            refs, role = [], ""
+            for m in list(getattr(d, "input", None) or []):
+                r = m.get("role", "") if isinstance(m, dict) else ""
+                body = _text(m.get("content") if isinstance(m, dict) else m)
+                if r == "system" and not role:
+                    hit = _ROLE_RX.search(body)
+                    role = hit.group(1).strip().lower() if hit else "agent"
+                refs.append({"role": r, **_ref(body)})
+            self._emit("llm.start", call=sid, role=role,
+                       model=getattr(d, "model", "") or "",
+                       n_messages=len(refs), messages=refs)
+            if err := getattr(span, "error", None):
+                self._emit("llm.error", call=sid, role=role, error=str(err)[:2000])
+                return
+            out = list(getattr(d, "output", None) or [])
+            text = " ".join(_text(o.get("content")) for o in out if isinstance(o, dict))
+            calls = []
+            for o in out:
+                for c in (o.get("tool_calls") or []) if isinstance(o, dict) else []:
+                    fn = c.get("function") or {}
+                    calls.append({"name": fn.get("name"), **_ref(str(fn.get("arguments", "")))})
+            u = getattr(d, "usage", None) or {}
+            self._emit("llm.end", call=sid, role=role, tool_calls=calls,
+                       elapsed=_span_elapsed(span),
+                       input_tokens=u.get("input_tokens") or u.get("prompt_tokens") or 0,
+                       output_tokens=u.get("output_tokens") or u.get("completion_tokens") or 0,
+                       **_ref(text))
+        except Exception:  # noqa: BLE001 - observation must never break the run
+            pass
+
+    def shutdown(self) -> None:
+        pass
+
+    def force_flush(self) -> None:
+        pass
+
+
+def install_sdk(node_id: str | None, phase: str = "") -> "SdkObserver | None":
+    """Point the SDK's tracing at our streams, replacing its uploader."""
+    try:
+        from agents import set_trace_processors
+    except Exception:  # noqa: BLE001 - the SDK is optional at import time
+        return None
+    obs = SdkObserver(node_id, phase)
+    set_trace_processors([obs])
     return obs
