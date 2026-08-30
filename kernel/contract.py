@@ -14,6 +14,13 @@ from .config import PATHS
 from .security import is_protected
 
 ENTRYPOINTS = ("edit_self", "improve_recipe")
+# Agents SDK tools that run locally or reach a third party. None of them go through
+# the sandbox in kernel/tools, so a role holding one could write anywhere on the box
+# or ship the workspace to a hosted service. Every tool an agent uses must come from
+# the kernel; these names are refused in the agent layer outright.
+BANNED_TOOLS = ("LocalShellTool", "ShellTool", "ComputerTool", "CodeInterpreterTool",
+                "ApplyPatchTool", "ProgrammaticToolCallingTool", "HostedMCPTool",
+                "WebSearchTool", "FileSearchTool", "ImageGenerationTool", "ToolSearchTool")
 ENTRY_MODULE = "roles.entrypoints"
 
 _PROBE = r'''
@@ -58,6 +65,19 @@ def check_diff(files: list[str], worktree: Path) -> ContractResult:
     outside = [f for f in files if not f.startswith("roles/")]
     if outside:
         return ContractResult(False, f"edit_self may only change roles/: {outside[:5]}")
+    for f in files:
+        path = worktree / f
+        if path.suffix != ".py" or not path.is_file():
+            continue
+        try:
+            body = path.read_text(errors="replace")
+        except OSError:
+            continue
+        hits = sorted({t for t in BANNED_TOOLS if t in body})
+        if hits:
+            return ContractResult(
+                False, f"{f} reaches for a tool outside the sandbox: {hits}. "
+                       f"Every tool must come from kernel/tools.")
     return ContractResult(True)
 
 

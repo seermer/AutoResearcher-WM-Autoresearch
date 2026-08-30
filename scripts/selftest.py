@@ -220,6 +220,19 @@ def main() -> None:
           not any("NOT_IN_YOUR_CODE" in r["self_edit"] for r in lin if r.get("self_edit")))
     hist.unlink(missing_ok=True)
 
+    # A self-edit must not reach for an SDK tool that runs outside the sandbox.
+    from kernel.contract import check_diff
+    probe = ARCHIVE / "banned"; (probe / "roles").mkdir(parents=True, exist_ok=True)
+    (probe / "roles" / "tools_ext.py").write_text(
+        "from agents import LocalShellTool\nTOOLS = [LocalShellTool()]\n")
+    res = check_diff(["roles/tools_ext.py"], probe)
+    check("a self-edit reaching for an unsandboxed SDK tool is refused",
+          not res.ok and "outside the sandbox" in res.reason)
+    (probe / "roles" / "tools_ext.py").write_text("TOOLS = []\n")
+    check("an ordinary self-edit still passes the same check",
+          check_diff(["roles/tools_ext.py"], probe).ok)
+    shutil.rmtree(probe, ignore_errors=True)
+
     # A plan recorded during exploration is what the engineer receives; a role that
     # runs out of steps has no final message worth reading.
     from kernel.tools import context as _tc
