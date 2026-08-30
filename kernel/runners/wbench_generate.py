@@ -115,6 +115,24 @@ def snap_frames(n: int, stride: int = 8) -> int:
     return int(np.ceil((n - 1) / stride) * stride + 1)
 
 
+def resolve_initial_image(wbench_root: Path, case: dict) -> Path:
+    """Locate a case's initial frame.
+
+    `settings.initial_image` is `images/case_<id>.jpg` relative to `data/` for 288 of
+    the 289 cases; case 4 still carries a preview-release path
+    (`data/wbench_preview/images/case_4.jpg`) that resolves nowhere. WBench is
+    read-only here, so the runner resolves the candidates instead of trusting the
+    field, and falls back to the id-derived name every other case uses.
+    """
+    rel = case["settings"]["initial_image"]
+    cid = case["id"]
+    for cand in (wbench_root / "data" / rel, wbench_root / rel,
+                 wbench_root / "data" / "images" / f"case_{cid}.jpg"):
+        if cand.is_file():
+            return cand
+    raise FileNotFoundError(f"case {cid}: no initial image for {rel!r}")
+
+
 def build_prompt(case: dict) -> str:
     parts = [case.get("environment_prompt", ""), case.get("character_prompt", ""),
              case.get("perspective_prompt", "")]
@@ -213,8 +231,7 @@ def main() -> None:
             if args.max_frames:
                 video_length = min(video_length, args.max_frames)
 
-            img_rel = case["settings"]["initial_image"]
-            image = Image.open(wbench_root / "data" / img_rel).convert("RGB")
+            image = Image.open(resolve_initial_image(wbench_root, case)).convert("RGB")
             cropped, src_size, resized_size, crop_offset = wm.resize_and_center_crop(image)
 
             num_frames = snap_frames(video_length)

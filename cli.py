@@ -113,11 +113,12 @@ def cmd_eval(args) -> None:
     node = a[args.node]
     ws = NodeWorkspace(node.id, node.parent)
     sana = ws.sana if ws.sana.exists() else PATHS.sana
-    # Re-evaluating by hand must regenerate: resuming would score the videos the
-    # previous checkpoint left behind and report them as this one's.
+    # Regenerates by default: resuming would score the videos the previous checkpoint
+    # left behind and report them as this one's. --resume opts out, for continuing a
+    # part-finished rung or re-running the same weights.
     res = Evaluator().run(node.id, sana, node.dir,
                           ckpt=Path(node.checkpoint_path) if node.checkpoint_path else None,
-                          full=args.full, resume=False)
+                          full=args.full, all_cases=args.all_cases, resume=args.resume)
     print(json.dumps(res.summary(), indent=2))
     if res.ok and args.full:
         node.full_score = res.score
@@ -162,7 +163,15 @@ def main() -> None:
     m = sub.add_parser("monitor"); m.add_argument("--port", type=int, default=8787)
     m.add_argument("--host", default="127.0.0.1"); m.set_defaults(fn=cmd_monitor)
     e = sub.add_parser("eval"); e.add_argument("--node", required=True)
-    e.add_argument("--full", action="store_true"); e.set_defaults(fn=cmd_eval)
+    e.add_argument("--full", action="store_true")
+    e.add_argument("--all-cases", action="store_true", dest="all_cases",
+                   help="with --full: the whole 289-case benchmark, not just the 158 navigation cases")
+    # Off by default: resuming would score whatever videos a previous checkpoint left
+    # behind and report them as this one's. Safe to pass when re-running the same
+    # weights, and the only way to continue a part-finished multi-hour rung.
+    e.add_argument("--resume", action="store_true",
+                   help="keep videos already generated in the work dir instead of regenerating")
+    e.set_defaults(fn=cmd_eval)
     args = p.parse_args()
     args.fn(args)
 

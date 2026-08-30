@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import weights
+from .cases import all_cases as all_wbench_cases
 from .cases import case_ids, navi_cases, proxy_cases
 from .config import BUDGET, CACHE_ENV, EVAL, PATHS
 from .trace import Tracer
@@ -258,9 +259,14 @@ class Evaluator:
     # ---- public ----
     def run(self, node_id: str, sana_root: Path, out_dir: Path, ckpt: Path | None,
             full: bool = False, base_ckpt: str | None = None, config: str | None = None,
-            resume: bool = True) -> EvalResult:
+            resume: bool = True, all_cases: bool = False) -> EvalResult:
         t0 = time.time()
-        cases = navi_cases() if full else proxy_cases()
+        # `all_cases` widens the full rung from the 158 camera-conditioned navigation
+        # cases to the whole 289-case benchmark. Generation is unchanged: WBench maps a
+        # non-navigation turn to a zero motion signal, so those cases still get a pose
+        # per frame, just a static one. Only the case list grows, and the work dir is
+        # shared with the navi rung so one resumes into the other.
+        cases = (all_wbench_cases() if all_cases else navi_cases()) if full else proxy_cases()
         work_dir = out_dir / ("wbench_full" if full else "wbench_proxy")
         work_dir.mkdir(parents=True, exist_ok=True)
         gpus = BUDGET.gpus.split(",")
