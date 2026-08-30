@@ -55,7 +55,9 @@ def n_plan(state: RecipeState) -> dict:
         f"Already tried in this archive:\n{state.get('already_tried','none')}\n\n"
         f"The Sana training codebase is at {c.sana_dir}; the baseline config is "
         f"configs/sana_wm/stage1/sana_wm_stage1_recipe_base.yaml. Inspect the data layout "
-        f"under {c.sana_dir}/data before deciding. Choose one intervention."),
+        f"under {c.sana_dir}/data before deciding. Choose one intervention.\n\n"
+        f"You have about {runner.STEP_LIMIT + 20} tool-calling steps. Budget them: "
+        f"record a plan well before you run out, then refine it."),
         # The planner inspects the data layout before it can choose, which is the
         # most tool-heavy role here. On the bare STEP_LIMIT it ran out mid-inspection
         # in every node that tried, leaving the engineer to improvise on an error

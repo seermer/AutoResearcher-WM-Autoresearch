@@ -41,6 +41,27 @@ def cmd_status(args) -> None:
           f"expandable={len(selection.expandable(a))} best={best.id if best else '-'}@{best.score if best else '-'}")
 
 
+def _busy_gpus() -> list[str]:
+    """GPUs already holding someone else's work. Queries nvidia-smi; runs nothing on them."""
+    import subprocess
+    try:
+        r = subprocess.run(["nvidia-smi", "--query-compute-apps=gpu_uuid", "--format=csv,noheader"],
+                           capture_output=True, text=True, timeout=30)
+        uuids = {l.strip() for l in r.stdout.splitlines() if l.strip()}
+        if not uuids:
+            return []
+        idx = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
+                             capture_output=True, text=True, timeout=30)
+        busy = []
+        for line in idx.stdout.splitlines():
+            parts = [x.strip() for x in line.split(",")]
+            if len(parts) == 2 and parts[1] in uuids:
+                busy.append(parts[0])
+        return sorted(busy)
+    except Exception:  # noqa: BLE001 - a preflight probe must not abort the preflight
+        return []
+
+
 def _dead_online_tools() -> list[tuple[str, bool]]:
     from kernel.tools import web
     probes = [("web_search", web.web_search, {"query": "huggingface datasets", "max_results": 3}),
@@ -84,6 +105,14 @@ def cmd_doctor(args) -> None:
     # A search tool that answers "(no results)" to everything reads to an agent as
     # "this data does not exist", and it spends the node's whole budget concluding
     # that. Each one is asked a question with a known answer.
+    # A node launches training on every GPU it is given. Someone else's job sitting on
+    # them does not fail the run, it just makes both slower and can push it into OOM.
+    busy = _busy_gpus()
+    wanted = [g.strip() for g in BUDGET.gpus.split(",") if g.strip()]
+    clash = sorted(set(busy) & set(wanted))
+    print(f"  {'FAIL' if clash else 'PASS'}  GPUs free"
+          + (f" (in use by another process: {','.join(clash)})" if clash else ""))
+    ok &= not clash
     for name, dead in _dead_online_tools():
         print(f"  {'FAIL' if dead else 'PASS'}  online tool: {name}")
         ok &= not dead
