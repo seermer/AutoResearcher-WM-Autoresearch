@@ -61,9 +61,21 @@ def n_plan(state: RecipeState) -> dict:
         # in every node that tried, leaving the engineer to improvise on an error
         # string; the engineer already gets this allowance for the same reason.
         memory_dir=c.memory_dir, steps=runner.STEP_LIMIT + 20)
+    # The recorded plan wins over the final message. A planner that runs out of steps
+    # has no final message worth reading, and one that rambles produces a message with
+    # none of these fields in it -- both happened in the first live run -- but either
+    # can still have recorded something usable on the way.
+    from kernel.tools.plan import read_plan
+    saved = read_plan(c.logs_dir)
+    if saved.get("plan"):
+        return {"plan": saved["plan"], "mechanism": saved.get("mechanism", ""),
+                "needs_data": bool(saved.get("needs_external_data")), "error": ""}
+    if err := runner.failed(out):
+        return {"plan": "", "mechanism": "", "needs_data": False, "error": err}
     return {"plan": runner.field(out, "PLAN", out),
             "mechanism": runner.field(out, "MECHANISM"),
-            "needs_data": runner.field(out, "NEEDS_EXTERNAL_DATA").lower().startswith("y")}
+            "needs_data": runner.field(out, "NEEDS_EXTERNAL_DATA").lower().startswith("y"),
+            "error": ""}
 
 
 def n_scout(state: RecipeState) -> dict:
@@ -128,6 +140,11 @@ def n_verify(state: RecipeState) -> dict:
 
 
 def _after_plan(state: RecipeState) -> str:
+    # Without this the engineer improvises on whatever the planner left behind. Both
+    # nodes that trained in the first live run did so on a plan that was an error
+    # string, because nothing checked before handing over.
+    if state.get("error") or not (state.get("plan") or "").strip():
+        return END
     return "scout" if state.get("needs_data") else "engineer"
 
 
@@ -146,7 +163,7 @@ def recipe_graph():
     g.add_node("verify", n_verify)
     g.add_edge(START, "analyze")
     g.add_edge("analyze", "plan")
-    g.add_conditional_edges("plan", _after_plan, {"scout": "scout", "engineer": "engineer"})
+    g.add_conditional_edges("plan", _after_plan, {"scout": "scout", "engineer": "engineer", END: END})
     g.add_edge("scout", "engineer")
     g.add_edge("engineer", "verify")
     g.add_conditional_edges("verify", _after_verify, {"engineer": "engineer", END: END})

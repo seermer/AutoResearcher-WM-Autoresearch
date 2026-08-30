@@ -138,6 +138,25 @@ def main() -> None:
                     "--phase", "edit_self", "--ctx", str(ctx), "--out", str(tmp / "out.json")],
                    cwd=str(wt), env=env, capture_output=True, timeout=600)
 
+    # The SDK ships a tracing exporter that uploads to OpenAI and is on by default.
+    # Checked in a fresh interpreter, which is the condition that actually matters.
+    probe = subprocess.run(
+        [PY, "-c",
+         "import kernel.config, agents.tracing as t;"
+         "p=t.get_trace_provider();"
+         "print('disabled', p._disabled);"
+         "from kernel import observe;"
+         "observe.install_sdk('probe','test');"
+         "print('processors', [type(x).__name__ for x in p._multi_processor._processors]);"
+         "print('reenabled', not p._disabled)"],
+        cwd=str(REPO), capture_output=True, text=True, timeout=120)
+    out = probe.stdout
+    check("importing the kernel disarms the SDK's trace uploader",
+          "disabled True" in out, out + probe.stderr[-300:])
+    check("installing capture replaces the uploader rather than adding to it",
+          "processors ['SdkObserver']" in out, out)
+    check("capture re-enables tracing once the exporter is ours", "reenabled True" in out, out)
+
     check("the node checkout cannot shadow the kernel package",
           not (wt / "kernel" / "SHADOWED").exists(),
           proc.stderr.decode("utf-8", "replace")[-400:])

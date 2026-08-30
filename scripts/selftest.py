@@ -220,6 +220,21 @@ def main() -> None:
           not any("NOT_IN_YOUR_CODE" in r["self_edit"] for r in lin if r.get("self_edit")))
     hist.unlink(missing_ok=True)
 
+    # A plan recorded during exploration is what the engineer receives; a role that
+    # runs out of steps has no final message worth reading.
+    from kernel.tools import context as _tc
+    from kernel.tools.plan import read_plan, record_plan
+    pdir = ARCHIVE / "plancheck"; pdir.mkdir(parents=True, exist_ok=True)
+    with _tc.using(_tc.ToolContext(node_id="p", writable=[pdir], readable=[pdir], log_dir=pdir)):
+        record_plan.invoke({"plan": "add turning clips", "mechanism": "navigation_accuracy",
+                            "needs_external_data": True, "risk": "disk"})
+        got = read_plan(pdir)
+        check("a recorded plan round-trips", got.get("plan") == "add turning clips"
+              and got.get("needs_external_data") is True)
+        refused = record_plan.invoke({"plan": "   "})
+        check("an empty plan is refused", refused.startswith("ERROR:"))
+    shutil.rmtree(pdir, ignore_errors=True)
+
     print("\n  tree:")
     for n in sorted(a.nodes, key=lambda x: x.id):
         print(f"    {n.id} {n.status:5s} score={n.score} cmp={n.cmp:.3f} "

@@ -12,6 +12,11 @@ Consider the whole space, not just downloading:
 
 State the expected mechanism: which WBench metric moves, and why this data changes it.
 
+Call `record_plan` as soon as you have a candidate, and again every time your
+thinking changes. What you record is what the engineer receives — your final
+message is not read if a plan has been recorded. Record early: if you run out of
+steps mid-investigation, the last plan you recorded is the one that gets built.
+
 Output exactly:
 PLAN: <the intervention, concretely>
 MECHANISM: <metric -> why this data moves it>

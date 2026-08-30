@@ -286,9 +286,10 @@ class SdkObserver:
 def install_sdk(node_id: str | None, phase: str = "") -> "SdkObserver | None":
     """Point the SDK's tracing at our streams, replacing its uploader."""
     try:
-        from agents import set_trace_processors
+        from agents import set_trace_processors, set_tracing_disabled
     except Exception:  # noqa: BLE001 - the SDK is optional at import time
         return None
     obs = SdkObserver(node_id, phase)
-    set_trace_processors([obs])
+    set_trace_processors([obs])      # replaces the uploader; must precede re-enabling
+    set_tracing_disabled(False)
     return obs

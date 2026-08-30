@@ -11,6 +11,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = REPO_ROOT.parent
 load_dotenv(REPO_ROOT / ".env")
 
+# The Agents SDK uploads every trace to OpenAI unless told otherwise, and its default
+# is on. Nothing here should ever leave the machine on that path, so it is disarmed as
+# soon as any kernel module is imported; observe.install_sdk turns tracing back on
+# once it has replaced the exporter with one that writes to the run's own streams.
+try:
+    from agents import set_tracing_disabled as _set_tracing_disabled
+
+    _set_tracing_disabled(True)
+except Exception:  # noqa: BLE001 - the SDK is optional
+    pass
+
 
 def _env_path(key: str, default: Path) -> Path:
     return Path(os.environ.get(key, str(default))).expanduser().resolve()
