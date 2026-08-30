@@ -65,7 +65,7 @@ def main() -> None:
         observe.install(ctx.node_id, args.phase)
 
         with tool_ctx.using(sandbox):
-            import agents.entrypoints as ep
+            import roles.entrypoints as ep
             result = getattr(ep, args.phase)(ctx)
         out_path.write_text(json.dumps(dataclasses.asdict(result), default=str))
     except BaseException as e:  # noqa: BLE001

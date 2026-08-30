@@ -18,7 +18,7 @@ What to consider changing, in rough order of expected value:
 Rules:
 - Read the history file first. Your edit should be justified by something that
   actually happened in this lineage, not by a general principle.
-- `agents/entrypoints.py` MUST keep exporting `edit_self(ctx)` and
+- `roles/entrypoints.py` MUST keep exporting `edit_self(ctx)` and
   `improve_recipe(ctx)`, each taking exactly one positional argument. A candidate
   that breaks this is thrown away.
 - Make ONE coherent change. A large diff that fails to compile scores zero.

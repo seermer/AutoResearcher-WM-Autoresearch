@@ -26,13 +26,13 @@ Holds no meta agent. Only mechanism:
 | `loop.py` | the outer loop |
 | `runners/` | dependency-light scripts run in the `sana` env or in an isolated agent process |
 
-### Agent layer — `agents/`, fully editable, versioned per node
+### Agent layer — `roles/`, fully editable, versioned per node
 `graph.py` (the explicit LangGraph topology), `roles.py`, `prompts/*.md`,
 `tools_ext/` (starts empty, the meta agent fills it), `memory.py`.
 The meta agent is itself part of this layer, so it can rewrite its own prompt,
 its own graph, and the tools every role sees.
 
-`agents/entrypoints.py` is the **contract**: it must always export
+`roles/entrypoints.py` is the **contract**: it must always export
 `edit_self(ctx)` and `improve_recipe(ctx)`, each taking one positional argument.
 This is re-verified programmatically after every self-edit.
 
@@ -146,7 +146,7 @@ loaded can pull in a half-written module or a truncated prompt.
 
 | | |
 |---|---|
-| editable | `agents/**`, the Sana training path, configs, the shared datastore |
+| editable | `roles/**`, the Sana training path, configs, the shared datastore |
 | **forbidden** | all of `WBench/`, `kernel/`, `Sana/inference_video_scripts/` |
 
 Sana's inference path is protected on purpose: if agents could change how the

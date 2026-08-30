@@ -95,7 +95,7 @@ def main() -> None:
     serve(LLM, llm_port)
 
     arch, work = tmp / "arch", tmp / "work"
-    (work / "agents" / "memory").mkdir(parents=True)
+    (work / "roles" / "memory").mkdir(parents=True)
     logs = tmp / "logs"
     logs.mkdir()
     (work / "history.jsonl").write_text('{"relation":"lineage","id":"n0000","score":83.7}\n')
@@ -103,7 +103,7 @@ def main() -> None:
     ctx.write_text(json.dumps({
         "ctx": {"node_id": "n0001", "parent_node_id": "n0000", "agents_dir": str(work),
                 "history_path": str(work / "history.jsonl"),
-                "memory_dir": str(work / "agents" / "memory"), "logs_dir": str(logs),
+                "memory_dir": str(work / "roles" / "memory"), "logs_dir": str(logs),
                 "parent_logs_dir": None, "eval_report_path": None, "parent_score": 83.7,
                 "parent_metrics": {}, "budget_seconds": 300, "notes": ""},
         "writable": [str(work)], "readable": [str(tmp), str(REPO)],
@@ -121,12 +121,12 @@ def main() -> None:
            "OPENAI_BASE_URL": f"http://127.0.0.1:{llm_port}", "OPENAI_API_KEY": "fake",
            "PYTHONUNBUFFERED": "1"}
     # A node runs out of its own checkout, which carries its own copy of `kernel`
-    # next to its own `agents`. Passing REPO as the worktree -- as this test used
+    # next to its own `roles`. Passing REPO as the worktree -- as this test used
     # to -- makes the two indistinguishable and hides which one wins. This stand-in
     # makes the shadow copy loud: importing it writes a marker and then fails.
     wt = tmp / "wt"
     (wt / "kernel").mkdir(parents=True)
-    (wt / "agents").symlink_to(REPO / "agents")
+    (wt / "roles").symlink_to(REPO / "roles")
     (wt / "kernel" / "__init__.py").write_text(
         "import pathlib\n"
         "pathlib.Path(__file__).with_name('SHADOWED').write_text('x')\n"

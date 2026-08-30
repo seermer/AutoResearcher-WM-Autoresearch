@@ -10,7 +10,7 @@ from langgraph.graph import END, START, StateGraph
 
 from kernel.api import EditSelfContext, ImproveRecipeContext
 
-from . import memory, roles
+from . import memory, runner
 
 MAX_ENGINEER_RETRIES = 2
 MAX_META_RETRIES = 1
@@ -40,17 +40,17 @@ class RecipeState(TypedDict, total=False):
 
 def n_analyze(state: RecipeState) -> dict:
     c = state["ctx"]
-    out = roles.run("analyst", (
+    out = runner.run("analyst", (
         f"Node {c.node_id}. The parent's WBench report is at {c.out_dir}/parent_report.json "
         f"(absent if this is the root). The archive history is at {c.history_path}. "
         f"Read them and diagnose."), memory_dir=c.memory_dir)
-    return {"weaknesses": roles.field(out, "WEAKNESSES", out),
-            "already_tried": roles.field(out, "ALREADY_TRIED")}
+    return {"weaknesses": runner.field(out, "WEAKNESSES", out),
+            "already_tried": runner.field(out, "ALREADY_TRIED")}
 
 
 def n_plan(state: RecipeState) -> dict:
     c = state["ctx"]
-    out = roles.run("planner", (
+    out = runner.run("planner", (
         f"Weaknesses:\n{state.get('weaknesses','')}\n\n"
         f"Already tried in this archive:\n{state.get('already_tried','none')}\n\n"
         f"The Sana training codebase is at {c.sana_dir}; the baseline config is "
@@ -60,20 +60,20 @@ def n_plan(state: RecipeState) -> dict:
         # most tool-heavy role here. On the bare STEP_LIMIT it ran out mid-inspection
         # in every node that tried, leaving the engineer to improvise on an error
         # string; the engineer already gets this allowance for the same reason.
-        memory_dir=c.memory_dir, steps=roles.STEP_LIMIT + 20)
-    return {"plan": roles.field(out, "PLAN", out),
-            "mechanism": roles.field(out, "MECHANISM"),
-            "needs_data": roles.field(out, "NEEDS_EXTERNAL_DATA").lower().startswith("y")}
+        memory_dir=c.memory_dir, steps=runner.STEP_LIMIT + 20)
+    return {"plan": runner.field(out, "PLAN", out),
+            "mechanism": runner.field(out, "MECHANISM"),
+            "needs_data": runner.field(out, "NEEDS_EXTERNAL_DATA").lower().startswith("y")}
 
 
 def n_scout(state: RecipeState) -> dict:
     c = state["ctx"]
-    out = roles.run("scout", (
+    out = runner.run("scout", (
         f"The plan is:\n{state.get('plan','')}\n\n"
         f"Find and verify data that makes this possible. Disk budget: {c.disk_gb:.0f} GB. "
         f"The loader layout is described in your instructions; say how each candidate maps to it."),
         memory_dir=c.memory_dir)
-    if src := roles.field(out, "RECOMMENDATION"):
+    if src := runner.field(out, "RECOMMENDATION"):
         memory.append(c.memory_dir, "sources", src.replace("\n", " ")[:300])
     return {"sources": out}
 
@@ -89,7 +89,7 @@ def n_engineer(state: RecipeState) -> dict:
     retry = ""
     if state.get("error"):
         retry = f"\n\nYour previous attempt failed: {state['error']}\nFix the cause; do not repeat it."
-    out = roles.run("engineer", (
+    out = runner.run("engineer", (
         f"Node {c.node_id}, attempt {attempt}.\n"
         f"PLAN:\n{state.get('plan','')}\n\n"
         f"SOURCES:\n{state.get('sources','(none needed)')}\n\n"
@@ -101,12 +101,12 @@ def n_engineer(state: RecipeState) -> dict:
         f"so set train.early_stop_hours from the time remaining now, not from your "
         f"nominal budget, and leave at least 15 minutes to verify and report.\n"
         f"Implement the plan, train, and report the checkpoint path.{retry}"),
-        memory_dir=c.memory_dir, steps=roles.STEP_LIMIT + 20)
-    return {"actions": roles.field(out, "ACTIONS", out),
-            "config": roles.field(out, "CONFIG"),
-            "steps": roles.field(out, "STEPS"),
-            "checkpoint": roles.field(out, "CHECKPOINT"),
-            "error": roles.failed(out),
+        memory_dir=c.memory_dir, steps=runner.STEP_LIMIT + 20)
+    return {"actions": runner.field(out, "ACTIONS", out),
+            "config": runner.field(out, "CONFIG"),
+            "steps": runner.field(out, "STEPS"),
+            "checkpoint": runner.field(out, "CHECKPOINT"),
+            "error": runner.failed(out),
             "attempts": attempt}
 
 
@@ -167,7 +167,7 @@ class EditState(TypedDict, total=False):
 
 def n_review(state: EditState) -> dict:
     c = state["ctx"]
-    out = roles.run("analyst", (
+    out = runner.run("analyst", (
         f"Node {c.node_id} is about to rewrite its own agent code. Its parent scored "
         f"{c.parent_score}. Read the archive history at {c.history_path}"
         + (f" and the previous iteration's agent transcripts at {c.parent_logs_dir}"
@@ -182,16 +182,16 @@ def n_review(state: EditState) -> dict:
 def n_meta(state: EditState) -> dict:
     c = state["ctx"]
     retry = f"\n\nYour previous edit was rejected: {state['error']}\nFix it." if state.get("error") else ""
-    out = roles.run("meta", (
+    out = runner.run("meta", (
         f"Node {c.node_id}. Agent code to edit: {c.agents_dir}/agents (writable).\n"
         f"Process review:\n{state.get('review','')}\n\n"
         f"History: {c.history_path}. Parent metrics: {json.dumps(c.parent_metrics)[:1200]}\n"
         f"Make ONE coherent improvement to the agent layer.{retry}"),
-        memory_dir=c.memory_dir, steps=roles.STEP_LIMIT + 10)
-    return {"change": roles.field(out, "CHANGE", out),
-            "hypothesis": roles.field(out, "HYPOTHESIS"),
-            "files": roles.field(out, "FILES"),
-            "error": roles.failed(out),
+        memory_dir=c.memory_dir, steps=runner.STEP_LIMIT + 10)
+    return {"change": runner.field(out, "CHANGE", out),
+            "hypothesis": runner.field(out, "HYPOTHESIS"),
+            "files": runner.field(out, "FILES"),
+            "error": runner.failed(out),
             "attempts": state.get("attempts", 0) + 1}
 
 

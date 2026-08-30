@@ -205,7 +205,7 @@ class Loop:
         parent_report = parent.dir / "wbench_proxy" / parent.id / "evaluation" / "report.json"
         ctx = EditSelfContext(
             node_id=node.id, parent_node_id=parent.id, agents_dir=ws.agents,
-            history_path=history, memory_dir=ws.agents / "agents" / "memory",
+            history_path=history, memory_dir=ws.agents / "roles" / "memory",
             logs_dir=logs, parent_logs_dir=(parent.dir / "logs" if (parent.dir / "logs").is_dir() else None),
             eval_report_path=parent_report if parent_report.exists() else None,
             parent_score=parent.score, parent_metrics=parent.metrics,
@@ -216,7 +216,7 @@ class Loop:
         # truncated prompt into the interpreter that is executing it.
         with self.tracer.span("edit_self"):
             res = self._run_agent("edit_self", ws.agents_frozen, ctx,
-                                  writable=[ws.agents / "agents"],
+                                  writable=[ws.agents / "roles"],
                                   readable=[PATHS.nodes, PATHS.sana, PATHS.wbench,
                                             ws.agents_frozen, ws.agents],
                                   log_dir=logs, timeout=BUDGET.edit_self_seconds)
@@ -253,7 +253,7 @@ class Loop:
         ctx = ImproveRecipeContext(
             node_id=node.id, agents_dir=ws.agents, sana_dir=ws.sana,
             datastore_dir=PATHS.datastore, out_dir=out_dir, history_path=history,
-            memory_dir=ws.agents / "agents" / "memory", logs_dir=logs,
+            memory_dir=ws.agents / "roles" / "memory", logs_dir=logs,
             base_checkpoint=weights.ensure_stage1()["dit"],
             wbench_dir=PATHS.wbench, budget_seconds=BUDGET.improve_recipe_seconds,
             deadline_ts=time.time() + BUDGET.improve_recipe_seconds,

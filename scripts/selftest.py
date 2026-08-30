@@ -61,9 +61,9 @@ def fake_agent(self, phase, worktree, ctx, writable, readable, log_dir, timeout)
         if beh.get("no_diff"):
             return {"ok": True, "summary": "no-op"}
         draft = Path(ctx.agents_dir)
-        target = draft / "agents" / "prompts" / "analyst.md"
+        target = draft / "roles" / "prompts" / "analyst.md"
         if beh.get("break_contract"):
-            (draft / "agents" / "entrypoints.py").write_text("def edit_self():\n    pass\n")
+            (draft / "roles" / "entrypoints.py").write_text("def edit_self():\n    pass\n")
         elif beh.get("touch_kernel"):
             (draft / "kernel" / "config.py").write_text("BROKEN = 1\n")
         else:

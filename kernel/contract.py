@@ -14,14 +14,14 @@ from .config import PATHS
 from .security import is_protected
 
 ENTRYPOINTS = ("edit_self", "improve_recipe")
-ENTRY_MODULE = "agents.entrypoints"
+ENTRY_MODULE = "roles.entrypoints"
 
 _PROBE = r'''
 import importlib, inspect, json, sys
 sys.path.insert(0, sys.argv[1])
 out = {"ok": False, "entrypoints": {}, "error": None}
 try:
-    m = importlib.import_module("agents.entrypoints")
+    m = importlib.import_module("roles.entrypoints")
     for name in ("edit_self", "improve_recipe"):
         fn = getattr(m, name, None)
         if fn is None or not callable(fn):
@@ -55,14 +55,14 @@ def check_diff(files: list[str], worktree: Path) -> ContractResult:
     bad = [f for f in files if is_protected(worktree / f)]
     if bad:
         return ContractResult(False, f"diff touches protected paths: {bad[:5]}")
-    outside = [f for f in files if not f.startswith("agents/")]
+    outside = [f for f in files if not f.startswith("roles/")]
     if outside:
-        return ContractResult(False, f"edit_self may only change agents/: {outside[:5]}")
+        return ContractResult(False, f"edit_self may only change roles/: {outside[:5]}")
     return ContractResult(True)
 
 
 def check_compiles(worktree: Path, timeout: int = 120) -> ContractResult:
-    p = subprocess.run([sys.executable, "-m", "compileall", "-q", str(worktree / "agents")],
+    p = subprocess.run([sys.executable, "-m", "compileall", "-q", str(worktree / "roles")],
                        capture_output=True, text=True, timeout=timeout)
     if p.returncode != 0:
         return ContractResult(False, "compile failed", {"stderr": p.stderr[-4000:]})
